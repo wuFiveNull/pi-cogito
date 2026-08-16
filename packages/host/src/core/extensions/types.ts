@@ -483,6 +483,13 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	label: string;
 	/** Description for LLM */
 	description: string;
+	/**
+	 * Optional search trigger words for the tool catalog (tool_search).
+	 * Space-separated aliases or colloquial phrasings not covered by name/description,
+	 * e.g. "memory recall 记忆 检索". Backward compatible: omitted entries search by
+	 * name and description only.
+	 */
+	searchHint?: string;
 	/** Optional one-line snippet for the Available tools section in the default system prompt. Custom tools are omitted from that section when this is not provided. */
 	promptSnippet?: string;
 	/** Optional guideline bullets appended to the default system prompt Guidelines section when this tool is active. */

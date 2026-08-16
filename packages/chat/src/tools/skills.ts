@@ -25,6 +25,7 @@ export function createLoadSkillTool(options: LoadSkillToolOptions): ToolDefiniti
 		label: "load_skill",
 		description:
 			"加载一个技能(SKILL.md)的完整内容。技能是按目录组织的(SKILL.md 位于技能目录内)。调用前可用 read 或本工具直接加载。",
+		searchHint: "技能 加载技能 SKILL skill 指令集",
 		promptSnippet: "Load a skill body",
 		promptGuidelines: ["Use load_skill to read the full body of a skill before executing its steps."],
 		parameters: Type.Object({

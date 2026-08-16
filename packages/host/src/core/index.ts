@@ -78,3 +78,29 @@ export {
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
+export { type CreateSubagentExtensionOptions, createSubagentExtension } from "./subagent-extension.ts";
+export {
+	DEFAULT_MAX_CONCURRENT_SUBAGENTS,
+	type RunningSubagentJob,
+	SubagentCapacityError,
+	SubagentManager,
+	type SubagentManagerOptions,
+	type SubagentRunner,
+	type SubagentRunRequest,
+	type SubagentRunResult,
+	type SubagentRunStatus,
+} from "./subagent-manager.ts";
+export {
+	createSubagentAgentRunner,
+	DEFAULT_SUBAGENT_MAX_ITERATIONS,
+	DEFAULT_SUBAGENT_TOOLS,
+	type SubagentAgentRunnerOptions,
+} from "./subagent-runner.ts";
+export {
+	createSpawnManageTool,
+	createSpawnTool,
+	createSubagentTools,
+	DEFAULT_SUBAGENT_BACKGROUND_RESULT_MAX_CHARS,
+	formatSubagentCompletion,
+	type SpawnToolOptions,
+} from "./subagent-tools.ts";

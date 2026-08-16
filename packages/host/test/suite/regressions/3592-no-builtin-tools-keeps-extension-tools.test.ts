@@ -78,8 +78,9 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 				.getAllTools()
 				.map((tool) => tool.name)
 				.sort(),
-		).toEqual(["bash", "dynamic_tool", "edit", "find", "grep", "ls", "read", "write"]);
-		expect(session.getActiveToolNames()).toEqual(["dynamic_tool"]);
+		).toEqual(["bash", "dynamic_tool", "edit", "find", "grep", "ls", "read", "tool_search", "write"]);
+		// tool_search is a host meta tool and stays active like any other extension tool.
+		expect([...session.getActiveToolNames()].sort()).toEqual(["dynamic_tool", "tool_search"]);
 		expect(session.systemPrompt).toContain("- dynamic_tool: Run dynamic test behavior");
 		expect(session.systemPrompt).not.toContain("- read:");
 		expect(session.systemPrompt).not.toContain("- bash:");
@@ -111,8 +112,9 @@ describe("regression #3592: no-builtin-tools keeps extension tools enabled", () 
 			noTools: "builtin",
 		});
 
-		expect(session.getActiveToolNames()).toEqual([]);
-		expect(session.systemPrompt).toContain("Available tools:\n(none)");
+		// tool_search is a host meta tool and stays active even with builtin tools disabled.
+		expect(session.getActiveToolNames()).toEqual(["tool_search"]);
+		expect(session.systemPrompt).toContain("- tool_search: Search and activate additional tools");
 		expect(session.systemPrompt).not.toContain("- read:");
 		session.dispose();
 	});

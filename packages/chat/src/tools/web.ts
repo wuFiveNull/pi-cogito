@@ -43,6 +43,7 @@ export function createWebTools(options: ChatWebToolOptions): ToolDefinition[] {
 			name: "web_fetch",
 			label: "web_fetch",
 			description: "抓取一个 HTTP(S) 网页并返回去掉 HTML 标签的正文片段。",
+			searchHint: "抓取 网页 网址 浏览页面 读取链接 fetch",
 			promptSnippet: "Fetch a web page",
 			promptGuidelines: [
 				"web_fetch only allows public HTTP(S) destinations; private networks and local hosts are denied.",
@@ -69,6 +70,7 @@ export function createWebTools(options: ChatWebToolOptions): ToolDefinition[] {
 			name: "web_search",
 			label: "web_search",
 			description: "搜索网页并返回结果列表(标题、摘要、链接)。需要配置 chat.web.search.url。",
+			searchHint: "搜索 查资料 上网 信息检索 谷歌 百度 search",
 			promptSnippet: "Search the web",
 			parameters: Type.Object({
 				query: Type.String({ description: "搜索关键词或问题" }),

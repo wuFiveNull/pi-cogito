@@ -19,6 +19,7 @@ export function createMemoryTools(memory: ChatMemory, scope: MemoryScope): ToolD
 			label: "memorize",
 			description:
 				"把一条事实、偏好或流程写入长期记忆。memoryType: event(一次性事实/决定)、profile(稳定用户信息)、preference(用户偏好与规则)、procedure(多步骤流程)。默认 scope 为当前会话;可用 channel/chatId 指定其他会话。",
+			searchHint: "记住 记忆 写入 保存 记住用户信息 memorize",
 			promptSnippet: "Write a fact to long-term memory",
 			promptGuidelines: [
 				"Prefer memorize over repeating facts: durable user facts, preferences, and procedures belong in memory.",
@@ -49,6 +50,7 @@ export function createMemoryTools(memory: ChatMemory, scope: MemoryScope): ToolD
 			label: "recall_memory",
 			description:
 				"检索长期记忆中与查询相关的内容(用户偏好、规则、历史事实)。默认 scope 为当前会话;可用 channel/chatId 指定其他会话。",
+			searchHint: "记忆 回忆 检索 用户偏好 历史 记得 recall",
 			promptSnippet: "Recall related long-term memory",
 			parameters: Type.Object({
 				query: Type.String({ description: "检索关键词或问题" }),
@@ -69,6 +71,7 @@ export function createMemoryTools(memory: ChatMemory, scope: MemoryScope): ToolD
 			name: "forget_memory",
 			label: "forget_memory",
 			description: "按记忆 id 删除(遗忘)记忆条目。",
+			searchHint: "忘记 删除记忆 遗忘 纠正错误记忆 forget",
 			promptSnippet: "Forget memory items",
 			parameters: Type.Object({
 				ids: Type.Array(Type.String({ description: "要删除的记忆 id" })),

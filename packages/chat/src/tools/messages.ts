@@ -16,6 +16,7 @@ export function createMessageHistoryTools(sdk: ChannelSdk): ToolDefinition[] {
 			name: "fetch_messages",
 			label: "fetch_messages",
 			description: "读取某个渠道会话的最近消息历史(含入站与出站)。",
+			searchHint: "消息回溯 历史消息 最近消息 聊天记录 fetch",
 			promptSnippet: "Fetch recent chat messages",
 			promptGuidelines: ["Use fetch_messages to review what was said earlier in a channel chat."],
 			parameters: Type.Object({
@@ -41,6 +42,7 @@ export function createMessageHistoryTools(sdk: ChannelSdk): ToolDefinition[] {
 			name: "search_messages",
 			label: "search_messages",
 			description: "在渠道消息历史中按关键词搜索。",
+			searchHint: "聊过什么 历史对话 消息搜索 之前说过 search",
 			promptSnippet: "Search chat message history",
 			parameters: Type.Object({
 				query: Type.String({ description: "搜索关键词" }),

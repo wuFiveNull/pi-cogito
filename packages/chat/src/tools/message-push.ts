@@ -14,6 +14,7 @@ export function createMessagePushTool(delivery: ChatDelivery): ToolDefinition {
 		label: "message_push",
 		description:
 			"向指定渠道的用户主动发送消息、文件或图片。需要目标渠道名(如 telegram、qq、web)和目标 chat_id。message 与 media 至少提供一个。",
+		searchHint: "推送 发消息 主动通知 提醒 发文件 发送",
 		promptSnippet: "Send a message or file to a channel chat",
 		promptGuidelines: ["Use message_push to send proactive messages, reminders, or files to any registered channel."],
 		parameters: Type.Object({

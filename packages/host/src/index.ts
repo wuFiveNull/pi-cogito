@@ -168,9 +168,15 @@ export {
 export { ExtensionSqlite } from "./core/extensions/sqlite.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export type {
+	ConsolidationBridgeEngine,
+	ConsolidationBridgeOptions,
+	ConsolidationBridgeResult,
+	ConsolidationLlm,
+} from "./core/memory/consolidation-bridge.ts";
 export type { MemoryEngine, MemoryEngineOptions } from "./core/memory/index.ts";
 // Memory engine
-export { createMemoryEngine, Memorizer, MemoryStore, Retriever } from "./core/memory/index.ts";
+export { ConsolidationBridge, createMemoryEngine, Memorizer, MemoryStore, Retriever } from "./core/memory/index.ts";
 export type {
 	BehaviorUpdate,
 	InjectionBlock,
@@ -287,6 +293,47 @@ export {
 	type SkillFrontmatter,
 } from "./core/skills.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
+export { type CreateSubagentExtensionOptions, createSubagentExtension } from "./core/subagent-extension.ts";
+// Subagent delegation
+export {
+	DEFAULT_MAX_CONCURRENT_SUBAGENTS,
+	type RunningSubagentJob,
+	SubagentCapacityError,
+	SubagentManager,
+	type SubagentManagerOptions,
+	type SubagentRunner,
+	type SubagentRunRequest,
+	type SubagentRunResult,
+	type SubagentRunStatus,
+} from "./core/subagent-manager.ts";
+export {
+	createSubagentAgentRunner,
+	DEFAULT_SUBAGENT_MAX_ITERATIONS,
+	DEFAULT_SUBAGENT_TOOLS,
+	type SubagentAgentRunnerOptions,
+} from "./core/subagent-runner.ts";
+export {
+	createSpawnManageTool,
+	createSpawnTool,
+	createSubagentTools,
+	DEFAULT_SUBAGENT_BACKGROUND_RESULT_MAX_CHARS,
+	formatSubagentCompletion,
+	type SpawnToolOptions,
+} from "./core/subagent-tools.ts";
+// Tool catalog (tool_search backend)
+export {
+	catalogEntryFromToolDefinition,
+	catalogSourceFromSourceInfo,
+	explainCatalogMatch,
+	KeywordSearchBackend,
+	normalizeQuery,
+	scoreCatalogEntry,
+	ToolCatalog,
+	type ToolCatalogEntry,
+	type ToolCatalogMatch,
+	type ToolCatalogSearchOptions,
+	type ToolCatalogSource,
+} from "./core/tool-catalog.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {

@@ -102,9 +102,11 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.ts";
+import { catalogEntryFromToolDefinition, ToolCatalog } from "./tool-catalog.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
+import { createToolSearchExtension } from "./tools/tool-search.ts";
 import { addUsageToTotals, createUsageTotals } from "./usage-totals.ts";
 
 // ============================================================================
@@ -379,6 +381,8 @@ export class AgentSession {
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
+	// Tool catalog backing tool_search; maintained incrementally in _refreshToolRegistry.
+	private readonly _toolCatalog = new ToolCatalog();
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
@@ -2511,6 +2515,7 @@ export class AgentSession {
 			});
 		}
 		this._toolDefinitions = definitionRegistry;
+		this._syncToolCatalog(definitionRegistry);
 		this._toolPromptSnippets = new Map(
 			Array.from(definitionRegistry.values())
 				.map(({ definition }) => {
@@ -2570,6 +2575,29 @@ export class AgentSession {
 		this.setActiveToolsByName([...new Set(nextActiveToolNames)]);
 	}
 
+	/**
+	 * Incrementally maintain the tool catalog at the registration collection
+	 * point: every registerTool / SDK custom tool / builtin definition flows
+	 * through the definitionRegistry, so this diff adds newly registered tools
+	 * and drops unregistered ones without a full rebuild. Builtin tools are
+	 * fully indexed on the first refresh at startup.
+	 */
+	private _syncToolCatalog(definitionRegistry: Map<string, ToolDefinitionEntry>): void {
+		const previousNames = this._toolCatalog.names();
+		const nextNames = new Set(definitionRegistry.keys());
+
+		for (const name of previousNames) {
+			if (!nextNames.has(name)) {
+				this._toolCatalog.remove(name);
+			}
+		}
+		for (const [name, { definition, sourceInfo }] of definitionRegistry) {
+			if (!previousNames.has(name)) {
+				this._toolCatalog.add(catalogEntryFromToolDefinition(definition, sourceInfo));
+			}
+		}
+	}
+
 	private _buildRuntime(options: {
 		activeToolNames?: string[];
 		flagValues?: Map<string, boolean | string>;
@@ -2602,7 +2630,15 @@ export class AgentSession {
 		}
 
 		this._extensionRunner = new ExtensionRunner(
-			extensionsResult.extensions,
+			[
+				...extensionsResult.extensions,
+				// Mount tool_search as a hidden inline extension so it flows through
+				// the standard extension pipeline (wrapping, active tools, catalog).
+				createToolSearchExtension(this._toolCatalog, {
+					getActiveTools: () => this.getActiveToolNames(),
+					setActiveTools: (toolNames) => this.setActiveToolsByName(toolNames),
+				}),
+			],
 			extensionsResult.runtime,
 			this._cwd,
 			this.sessionManager,

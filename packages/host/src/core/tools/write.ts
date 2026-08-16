@@ -45,6 +45,7 @@ export function createWriteToolDefinition(
 		label: "write",
 		description:
 			"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+		searchHint: "写入 创建 保存 写文件 新建 file write",
 		promptSnippet: "Create or overwrite files",
 		promptGuidelines: ["Use write only for new files or complete rewrites."],
 		parameters: writeSchema,

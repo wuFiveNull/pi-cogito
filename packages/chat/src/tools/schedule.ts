@@ -23,6 +23,7 @@ export function createScheduleTools(
 			label: "schedule",
 			description:
 				"注册定时任务,到点向当前会话发送消息。trigger: at(绝对时间,如 '14:30' 或 ISO 时间)、after(相对延迟,如 '30s' '5m' '2h' '1d')、every(循环,如 '1h' '30m' 或每日 '09:00')。tier: instant(到点直接发送 prompt 文本)、soft(到点调用 AI 生成内容后发送)。",
+			searchHint: "定时 提醒 闹钟 预约 循环任务 定时任务",
 			promptSnippet: "Register a scheduled reminder",
 			promptGuidelines: ["Use schedule for reminders and timed tasks; every triggers repeat until cancelled."],
 			parameters: Type.Object({
@@ -50,6 +51,7 @@ export function createScheduleTools(
 			name: "list_schedules",
 			label: "list_schedules",
 			description: "列出当前会话的所有定时任务。",
+			searchHint: "查看定时 任务列表 有哪些提醒 list",
 			promptSnippet: "List scheduled tasks",
 			parameters: Type.Object({}),
 			async execute(): Promise<AgentToolResult<undefined>> {
@@ -67,6 +69,7 @@ export function createScheduleTools(
 			name: "cancel_schedule",
 			label: "cancel_schedule",
 			description: "取消(停用)一个定时任务。",
+			searchHint: "取消定时 删除任务 停止提醒 cancel",
 			promptSnippet: "Cancel a scheduled task",
 			parameters: Type.Object({
 				id: Type.String({ description: "要取消的任务 id" }),
