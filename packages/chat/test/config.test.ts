@@ -25,6 +25,7 @@ describe("loadChatConfig", () => {
 		expect(config.model).toBeUndefined();
 		expect(config.streaming).toBe(true);
 		expect(config.memory?.enabled).toBe(true);
+		expect(config.memory?.injectProfile).toBe(true);
 		expect(config.web?.enabled).toBe(true);
 		expect(config.sessions?.maxIdleMinutes).toBe(30);
 		expect(config.sessions?.maxSessions).toBe(50);
@@ -38,7 +39,7 @@ describe("loadChatConfig", () => {
 				thinkingLevel: "high",
 				streaming: false,
 				tools: { allowed: ["read", "schedule"], excluded: ["bash"] },
-				memory: { enabled: false, dbPath: "/tmp/mem.sqlite" },
+				memory: { enabled: false, dbPath: "/tmp/mem.sqlite", injectProfile: false },
 				web: {
 					enabled: false,
 					fetch: { maxChars: 4000, maxRedirectHops: 2 },
@@ -57,6 +58,7 @@ describe("loadChatConfig", () => {
 		expect(config.tools?.excluded).toEqual(["bash"]);
 		expect(config.memory?.enabled).toBe(false);
 		expect(config.memory?.dbPath).toBe("/tmp/mem.sqlite");
+		expect(config.memory?.injectProfile).toBe(false);
 		expect(config.web?.enabled).toBe(false);
 		expect(config.web?.fetch?.maxChars).toBe(4000);
 		expect(config.web?.fetch?.maxRedirectHops).toBe(2);

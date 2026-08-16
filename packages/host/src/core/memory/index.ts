@@ -68,6 +68,13 @@ export async function createMemoryEngine(options: MemoryEngineOptions): Promise<
 	};
 }
 
+export type {
+	ConsolidationBridgeEngine,
+	ConsolidationBridgeOptions,
+	ConsolidationBridgeResult,
+	ConsolidationLlm,
+} from "./consolidation-bridge.ts";
+export { ConsolidationBridge } from "./consolidation-bridge.ts";
 export { Memorizer, MemoryStore, Retriever };
 export {
 	extractHappenedAt,

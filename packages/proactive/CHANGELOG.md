@@ -22,6 +22,7 @@
 - Delivery acknowledgements now have a durable outbox migration path for existing databases and notify async retry bookkeeping.
 - Drift 生命周期事件现在通过 `DriftEventObserved` 进入 Proactive `EventBus`；宿主可注入总线统一订阅 tick、投递与 Drift 事件。
 - Memory background tasks now start with the pusher, expose serialized on-demand triggers, and shut down idempotently.
+- Added the consolidation bridge wiring: `memory.vectorSync` (default true) syncs markdown-layer consolidation output into the host memory engine (`agentDir/memory/memory.sqlite`) through `ConsolidationBridge` — `history_entries` become idempotent `event` items and a second-pass LLM extraction writes profile/preference/procedure items; automatically skipped when no embedding model is configured.
 - Added per-turn `BeforeTurn` hooks for event-driven memory consolidation, while retaining scheduled scans as a recovery fallback.
 - Unified proactive, wake, profile, dedupe, judge, resolve, and memory LLM calls through the shared `@cogito/ai/chat` adapter.
 - Added strict source contracts for declared channels, event identity, preprocess scores, and timestamps, with per-item quarantine and source health diagnostics.

@@ -71,6 +71,8 @@ export interface MemoryTasksOptions {
 	consolidateConfig?: import("./extract.ts").ConsolidationConfig;
 	/** 复用同一个 store(默认按 workspaceDir 新建)。 */
 	memory?: MarkdownMemoryStore;
+	/** 向量层桥接回调:consolidation 写 markdown 后、推进游标前调用(host ConsolidationBridge)。 */
+	onConsolidated?: (payload: import("./extract.ts").ConsolidatedPayload) => Promise<void> | void;
 }
 
 export interface MemoryTasksHandle {
@@ -101,6 +103,7 @@ export function startMemoryTasks(options: MemoryTasksOptions): MemoryTasksHandle
 		cursorStore: new FileCursorStore(store.memoryDir),
 		intervalSeconds: options.consolidateIntervalSeconds,
 		config: options.consolidateConfig,
+		onConsolidated: options.onConsolidated,
 	});
 	const tasks = Promise.allSettled([optimizerLoop.run(), consolidationLoop.run()]);
 	let stopPromise: Promise<void> | undefined;

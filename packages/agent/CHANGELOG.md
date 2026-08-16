@@ -12,6 +12,7 @@
 - Added bounded `Session.findEntriesOnBranch()` and `findEntryOnBranch()` queries with explicit traversal, filtering, ordering, and limit options.
 - Added memory background task lifecycle controls: serialized on-demand optimization/consolidation triggers and idempotent shutdown.
 - Added composable `before_turn`/`before_reasoning`/`after_reasoning`/`after_turn` lifecycle modules with dependency slots and pre-provider abort gates; memory consolidation can block a failed turn while listener and timer-based scanning remain recovery paths.
+- Restored `history_entries` extraction in session consolidation (event timeline entries with `emotional_weight`), added an `onConsolidated` bridge callback carrying `source_ref` / `historyEntries` / `conversation` / scope for vector-layer sync, and heuristic `channel:chatId` scope resolution from session file names (global scope when absent).
 
 ## [0.83.0] - 2026-07-29
 

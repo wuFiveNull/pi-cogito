@@ -24,7 +24,7 @@ import type {
 	DriftStagedDelivery,
 } from "@cogito/gate";
 import { DriftGateStore, DriftStagedDeliveryStore, hashOutboundMessage } from "@cogito/gate";
-import type { ModelRuntime } from "@cogito/host";
+import { ConsolidationBridge, createMemoryEngine, type MemoryEngine, type ModelRuntime } from "@cogito/host";
 import { BeforeTurn, Delivered, DriftEventObserved, EventBus } from "./bus.ts";
 import { type Clock, clockFromEnv, ReplayClock } from "./clock.ts";
 import type { DriftGateWriter } from "./drift-gate.ts";
@@ -267,6 +267,8 @@ export interface PusherConfig extends DefaultStagesConfig {
 		keepCount?: number;
 		minNewMessages?: number;
 		maxConversationChars?: number;
+		/** 把 consolidation 产物同步写入向量库(host MemoryEngine)。默认 true;无嵌入模型时自动跳过。 */
+		vectorSync?: boolean;
 	};
 	/** Feishu 出口:读取根目录 config.json 的 channels.feishu 与 proactive.targets。 */
 	delivery?: {
@@ -892,6 +894,22 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 
 	let memoryTasks: MemoryTasksHandle | undefined;
 	let memoryTaskOptions: MemoryTasksOptions | undefined;
+	// 向量层桥(consolidation 桥):把 markdown 层提取产物同步写入 host MemoryEngine。
+	let memoryBridgeEngine: MemoryEngine | undefined;
+	let memoryBridge: ConsolidationBridge | undefined;
+	const ensureMemoryBridge = async (): Promise<ConsolidationBridge | undefined> => {
+		if (!memoryTaskOptions) return undefined;
+		if (!memoryBridge) {
+			const engine = await createMemoryEngine({ agentDir });
+			memoryBridgeEngine = engine;
+			memoryBridge = new ConsolidationBridge({
+				engine,
+				llm: memoryTaskOptions.llm,
+				log: (message) => console.error(`proactive memory bridge: ${message}`),
+			});
+		}
+		return memoryBridge;
+	};
 	const memoryConfig = config.memory;
 	if (memoryConfig?.enabled) {
 		const memoryApiKey = config.agentTick?.apiKey ?? resolveApiKey(config.agentTick);
@@ -911,6 +929,13 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 					minNewMessages: memoryConfig.minNewMessages,
 					maxConversationChars: memoryConfig.maxConversationChars,
 				},
+				onConsolidated:
+					memoryConfig.vectorSync === false
+						? undefined
+						: async (payload) => {
+								const bridge = await ensureMemoryBridge();
+								if (bridge) await bridge.handleConsolidated(payload);
+							},
 			};
 		}
 	}
@@ -1264,6 +1289,9 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 				await cleanup(() => unsubscribeAsyncDelivery?.());
 				await cleanup(() => unsubscribeDriftDelivery());
 				await cleanup(async () => await memoryTasks?.stop());
+				await cleanup(async () => {
+					await memoryBridgeEngine?.close();
+				});
 				await cleanup(() => {
 					unsubscribeMemoryBeforeTurn?.forEach((unsubscribe) => {
 						unsubscribe();
@@ -1415,6 +1443,9 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 			await cleanup(() => unsubscribeAsyncDelivery?.());
 			await cleanup(() => unsubscribeDriftDelivery());
 			await cleanup(async () => await memoryTasks?.stop());
+			await cleanup(async () => {
+				await memoryBridgeEngine?.close();
+			});
 			await cleanup(() => {
 				unsubscribeMemoryBeforeTurn?.forEach((unsubscribe) => {
 					unsubscribe();

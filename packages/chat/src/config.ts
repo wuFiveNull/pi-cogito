@@ -42,6 +42,8 @@ export interface ChatMemoryConfig {
 	enabled?: boolean;
 	/** Memory database path. Default agentDir/memory/memory.sqlite. */
 	dbPath?: string;
+	/** Inject the stable memory files (SELF/MEMORY/RECENT_CONTEXT) each turn. Default true. */
+	injectProfile?: boolean;
 }
 
 export interface ChatSessionsConfig {
@@ -115,8 +117,12 @@ export function loadChatConfig(configPath: string): ChatConfig {
 			? { allowed: optionalStringArray(chat.tools.allowed), excluded: optionalStringArray(chat.tools.excluded) }
 			: undefined,
 		memory: isRecord(chat.memory)
-			? { enabled: optionalBoolean(chat.memory.enabled, true), dbPath: optionalString(chat.memory.dbPath) }
-			: { enabled: true },
+			? {
+					enabled: optionalBoolean(chat.memory.enabled, true),
+					dbPath: optionalString(chat.memory.dbPath),
+					injectProfile: optionalBoolean(chat.memory.injectProfile, true),
+				}
+			: { enabled: true, injectProfile: true },
 		web: isRecord(chat.web)
 			? {
 					enabled: optionalBoolean(chat.web.enabled, true),

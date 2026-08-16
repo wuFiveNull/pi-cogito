@@ -8,7 +8,12 @@
 
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { type ConsolidationConfig, consolidateSession, type SessionCursorStore } from "./extract.ts";
+import {
+	type ConsolidatedPayload,
+	type ConsolidationConfig,
+	consolidateSession,
+	type SessionCursorStore,
+} from "./extract.ts";
 import { secondsUntilAlignedInterval } from "./loop.ts";
 import type { MarkdownMemoryStore } from "./markdown-store.ts";
 import type { MemoryLlm } from "./optimizer.ts";
@@ -22,6 +27,8 @@ export interface ConsolidationLoopOptions {
 	cursorStore: SessionCursorStore;
 	intervalSeconds?: number;
 	config?: ConsolidationConfig;
+	/** 向量层桥接回调:consolidation 写 markdown 后、推进游标前调用。 */
+	onConsolidated?: (payload: ConsolidatedPayload) => Promise<void> | void;
 	nowFn?: () => Date;
 }
 
@@ -32,6 +39,7 @@ export class ConsolidationLoop {
 	private readonly cursorStore: SessionCursorStore;
 	private readonly interval: number;
 	private readonly config: ConsolidationConfig;
+	private readonly onConsolidated: ((payload: ConsolidatedPayload) => Promise<void> | void) | undefined;
 	private readonly nowFn: () => Date;
 	private running = false;
 	private wakeSleep: (() => void) | undefined;
@@ -44,6 +52,7 @@ export class ConsolidationLoop {
 		this.cursorStore = options.cursorStore;
 		this.interval = Math.max(60, options.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
 		this.config = options.config ?? {};
+		this.onConsolidated = options.onConsolidated;
 		this.nowFn = options.nowFn ?? (() => new Date());
 	}
 
@@ -84,6 +93,7 @@ export class ConsolidationLoop {
 					sessionFile: file,
 					cursorStore: this.cursorStore,
 					config: this.config,
+					onConsolidated: this.onConsolidated,
 				});
 				if (result.consolidated > 0) touched++;
 			} catch {

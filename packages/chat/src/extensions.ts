@@ -9,15 +9,19 @@
  * - optional persona appended to the system prompt.
  */
 
+import { readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { AgentMessage } from "@cogito/agent-core";
 import type { TextContent } from "@cogito/ai";
 import {
+	createSubagentExtension,
 	DefaultResourceLoader,
 	type ExtensionFactory,
 	type InlineExtension,
 	type ResourceLoader,
 	type SettingsManager,
+	SubagentManager,
+	type SubagentRunner,
 	type ToolDefinition,
 } from "@cogito/host";
 import type { ChatMemory } from "./memory.ts";
@@ -32,6 +36,14 @@ export interface ChatExtensionsOptions {
 	chatTools: ToolDefinition[];
 	extensionsDir?: string;
 	persona?: string;
+	/** 每轮注入 memory/*.md 稳定档案(SELF/MEMORY/RECENT_CONTEXT)。默认 true。 */
+	injectMemoryProfile?: boolean;
+	/**
+	 * Shared sub-agent runner. When provided, each session gets its own
+	 * SubagentManager (concurrency cap applies per conversation) and the
+	 * spawn / spawn_manage tools are registered.
+	 */
+	subagentRunner?: SubagentRunner;
 }
 
 /** Build the per-session resource loader with chat inline extensions. */
@@ -48,7 +60,10 @@ export async function createChatResourceLoader(options: ChatExtensionsOptions): 
 		extensionFactories.push({
 			name: "chat-memory-injection",
 			hidden: true,
-			factory: createMemoryInjectionExtension(options.memory, options.scope),
+			factory: createMemoryInjectionExtension(options.memory, options.scope, {
+				agentDir: options.agentDir,
+				injectProfile: options.injectMemoryProfile !== false,
+			}),
 		});
 	}
 	if (options.chatTools.length > 0) {
@@ -57,6 +72,13 @@ export async function createChatResourceLoader(options: ChatExtensionsOptions): 
 			hidden: true,
 			factory: createChatToolsExtension(options.chatTools),
 		});
+	}
+	if (options.subagentRunner) {
+		extensionFactories.push(
+			createSubagentExtension({
+				manager: new SubagentManager({ runner: options.subagentRunner }),
+			}),
+		);
 	}
 	const loader = new DefaultResourceLoader({
 		cwd: options.projectDir,
@@ -80,11 +102,19 @@ function createChatToolsExtension(tools: ToolDefinition[]): ExtensionFactory {
 /**
  * Inject a scoped memory recall block before each provider request.
  *
- * Retrieval runs once per distinct user query (cached for the rest of the
- * turn's tool loop); the block is appended to the last user message, or
- * prepended as a system message during tool loops.
+ * The stable profile block (SELF.md → MEMORY.md → RECENT_CONTEXT.md, mirroring
+ * the akashic per-turn priority: self model → long-term memory → recent
+ * context) is read from agentDir/memory on every context event; missing files
+ * are skipped. The vector recall block is appended after it. Retrieval runs
+ * once per distinct user query (cached for the rest of the turn's tool loop);
+ * the combined block is appended to the last user message, or prepended as a
+ * system message during tool loops.
  */
-function createMemoryInjectionExtension(memory: ChatMemory, scope: ChatSessionScope): ExtensionFactory {
+function createMemoryInjectionExtension(
+	memory: ChatMemory,
+	scope: ChatSessionScope,
+	options: { agentDir: string; injectProfile: boolean },
+): ExtensionFactory {
 	return (pi) => {
 		let lastQuery = "";
 		let cachedBlock = "";
@@ -100,16 +130,55 @@ function createMemoryInjectionExtension(memory: ChatMemory, scope: ChatSessionSc
 					cachedBlock = "";
 				}
 			}
-			if (cachedBlock.length === 0) return;
+			const stableBlock = options.injectProfile ? buildStableMemoryBlock(options.agentDir) : "";
+			const fullBlock = [stableBlock, cachedBlock].filter((part) => part.trim().length > 0).join("\n\n");
+			if (fullBlock.length === 0) return;
 			const messages = event.messages;
 			const targetIndex = lastUserIndex(messages);
 			if (targetIndex < 0) return;
 			const target = messages[targetIndex];
 			if (!isUserMessage(target)) return;
-			messages[targetIndex] = appendToUserMessage(target, cachedBlock);
+			messages[targetIndex] = appendToUserMessage(target, fullBlock);
 			return { messages };
 		});
 	};
+}
+
+/**
+ * Build the stable memory profile block from agentDir/memory/*.md.
+ *
+ * Order matches akashic prompt-block priority: SELF.md (full) → MEMORY.md
+ * (full; maintained by the 18h optimizer so it is naturally stable) →
+ * RECENT_CONTEXT.md (Compression + Ongoing Threads only, Recent Turns is
+ * trimmed because it duplicates the sliding window).
+ */
+export function buildStableMemoryBlock(agentDir: string): string {
+	const parts: string[] = [];
+	const self = readOptionalText(join(agentDir, "memory", "SELF.md"));
+	if (self) parts.push(`## 自我认知\n\n${self}`);
+	const memory = readOptionalText(join(agentDir, "memory", "MEMORY.md"));
+	if (memory) parts.push(`## 长期记忆\n\n${memory}`);
+	const recent = trimRecentTurns(readOptionalText(join(agentDir, "memory", "RECENT_CONTEXT.md")));
+	if (recent) parts.push(`## 近期语境\n\n${recent}`);
+	return parts.join("\n\n");
+}
+
+/** Remove the "## Recent Turns" tail (duplicates the live sliding window). */
+export function trimRecentTurns(text: string | undefined): string {
+	if (!text) return "";
+	const marker = "\n## Recent Turns";
+	let cut = text.indexOf(marker);
+	if (cut < 0 && text.trimStart().startsWith("## Recent Turns")) cut = 0;
+	return cut >= 0 ? text.slice(0, cut).trim() : text.trim();
+}
+
+function readOptionalText(path: string): string | undefined {
+	try {
+		const text = readFileSync(path, "utf-8").trim();
+		return text.length > 0 ? text : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 function lastUserText(messages: AgentMessage[]): string {

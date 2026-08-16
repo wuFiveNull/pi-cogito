@@ -1,9 +1,10 @@
 /**
  * 对话记忆提取器(akashic core/memory/markdown.py consolidation 移植,范围 B)。
  *
- * 从会话中按窗口选择新消息 → LLM 提取 pending_items(7 种 tag + 硬过滤规则)
- * → 校验并格式化 → appendPendingOnce(按 source_ref 幂等)→ 推进游标。
- * history_entries(向量库事件)在 pi 无向量库,不提取(已从 prompt 中移除)。
+ * 从会话中按窗口选择新消息 → LLM 提取 history_entries(向量库事件)+ pending_items
+ * (7 种 tag + 硬过滤规则)→ 校验并格式化 → appendPendingOnce(按 source_ref 幂等)
+ * → 通过 onConsolidated 回调把 history_entries/conversation/scope 交给向量层桥
+ * (host ConsolidationBridge)→ 推进游标。
  */
 
 import { readFileSync } from "node:fs";
@@ -149,6 +150,58 @@ export function formatPendingItems(rawItems: unknown): string {
 	return lines.join("\n");
 }
 
+/** 单条 history entry(向量库 event 类型写入用)。 */
+export interface HistoryEntry {
+	summary: string;
+	emotionalWeight: number;
+}
+
+/** 宽容归一化 emotional_weight(akashic engine._coerce_emotional_weight):非法值归 0,范围 0-10。 */
+export function coerceEmotionalWeight(value: unknown): number {
+	const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+	if (!Number.isFinite(parsed)) return 0;
+	return Math.max(0, Math.min(10, Math.trunc(parsed)));
+}
+
+/**
+ * 校验并归一化模型输出的 history_entries(akashic _normalize_history_entries):
+ * 兼容字符串数组与 {summary, emotional_weight} 对象数组,按摘要去重;
+ * summary 非字符串视为结构性错误(整页失败),其余非法值跳过。
+ */
+export function normalizeHistoryEntries(rawEntries: unknown): HistoryEntry[] {
+	const entries: HistoryEntry[] = [];
+	const seen = new Set<string>();
+	const candidates: unknown[] = [];
+	if (Array.isArray(rawEntries)) {
+		candidates.push(...rawEntries);
+	} else if (rawEntries !== undefined && rawEntries !== null) {
+		if (typeof rawEntries !== "string" && (typeof rawEntries !== "object" || Array.isArray(rawEntries))) {
+			throw new Error("history_entries must be an array or object");
+		}
+		candidates.push(rawEntries);
+	}
+	for (const item of candidates) {
+		let summary: string;
+		let emotionalWeight = 0;
+		if (typeof item === "string") {
+			summary = item.trim();
+		} else if (typeof item === "object" && item !== null) {
+			const record = item as Record<string, unknown>;
+			if (typeof record.summary !== "string") {
+				throw new Error("history entry summary must be a string");
+			}
+			summary = record.summary.trim();
+			emotionalWeight = coerceEmotionalWeight(record.emotional_weight);
+		} else {
+			throw new Error("history_entries entries must be strings or objects");
+		}
+		if (!summary || seen.has(summary)) continue;
+		seen.add(summary);
+		entries.push({ summary, emotionalWeight });
+	}
+	return entries;
+}
+
 /** 宽松 JSON 解析(容忍 ```json 围栏与前后杂文)。 */
 export function parseJsonLoose(text: string): unknown {
 	const trimmed = text.trim();
@@ -181,11 +234,33 @@ export function buildExtractionPrompt(options: {
 	currentMemory: string;
 	recentContext?: string;
 }): string {
-	return `从对话中提取用户长期记忆候选,返回 JSON。
+	return `从对话中提取结构化信息,返回 JSON。
 
 ## 字段说明
 
-### "pending_items" → PENDING.md 候选缓冲
+### 1. "history_entries" → 记忆事件条目(数组,每条对应一个独立主题)
+按主题拆分,每个独立话题写一条对象,格式为 {"summary":"...", "emotional_weight":0}。
+summary 要求 1-2 句,以 [YYYY-MM-DD HH:MM] 开头,保留足够细节便于后续向量写入和回源判断。
+不同主题必须拆成独立条目,不得合并。若整段对话只有一个主题,返回只含一条的数组。
+
+history_entries.emotional_weight 规则:
+- 范围 0-10
+- 普通技术讨论、普通事务记录、无明显情绪色彩 → 0
+- 用户明确表达强烈喜欢/厌恶、明显受挫、关系冲突、情绪波动时按强度给 3-9
+- 不确定时保守输出 0
+
+**history_entries 提取规则(严格遵守)**:
+1. 只提取 USER 明确表达的行动、经历、计划和状态;ASSISTANT 的建议、推荐、解释一律不写入,即使其中提到了地名、店名或活动。
+2. 每条必须是简洁的第三人称摘要句,绝对不能包含 "USER:" 或 "ASSISTANT:" 等原始对话标记,不得复制粘贴原始对话文本。
+3. 商家名称、地点、人名、数量、价格、型号等具体细节必须保留,不得用"某商店""某地方"概括。
+4. 先判断当前 USER 内容的材料类型:是"用户此刻直接自述",还是"用户正在展示一段外部聊天记录、截图 OCR、转贴 transcript 给助手看"。
+5. 若 USER 内容属于外部聊天记录 / transcript,必须先做层级理解:外层是用户把材料发给助手看;内层材料中可能有多个 speaker,这些 speaker 不自动等于当前 USER。只有当某个 speaker 与当前 USER 的映射在当前会话里被明确确认时,才允许把该 speaker 的事实写入摘要。
+6. 对 transcript 场景,默认认为 speaker 映射不明确;除非当前会话中有非常明确的显式说明,否则不要判断材料里的昵称/说话人就是用户或对方。
+7. 若 speaker 映射不明确,history_entries 只允许写 1 条高层 event,例如"用户向助手展示了一段与某人的聊天记录,内容涉及求职、学校、兴趣等话题"。
+8. 对 transcript 场景,禁止输出任何未确认关系的句子,如"用户向对方透露……""对方是……""双方确认……",或把聊天记录里的具体事实直接写成用户个人经历。
+9. transcript 场景下,默认最多输出 1 条高层 history_entry;不要下钻成人物小传,不要替 speaker 自动补全身份关系。
+
+### 2. "pending_items" → PENDING.md 候选缓冲
 只写用户的长期记忆候选,返回对象数组。每个对象格式:
 {"tag": "<tag>", "content": "<string>"}
 
@@ -250,7 +325,7 @@ ${options.recentContext}\n`
 ## 待处理对话
 ${options.conversation}
 
-只返回合法 JSON:{"pending_items": [...]}。不要 markdown 代码块。`;
+只返回合法 JSON:{"history_entries": [...], "pending_items": [...]}。不要 markdown 代码块。`;
 }
 
 // ------------------------------------------------------------------
@@ -296,7 +371,13 @@ export interface ExtractPendingOptions {
 	recentContext?: string;
 }
 
-/** 提取器:LLM 输出 → 校验 → "- [tag] content" 行。 */
+/** LLM 输出的校验后产物:历史事件条目 + PENDING 行文本。 */
+export interface ExtractionPayload {
+	historyEntries: HistoryEntry[];
+	pendingItems: string;
+}
+
+/** 提取器:LLM 输出 → 校验 → historyEntries + "- [tag] content" 行。 */
 export class ConsolidationExtractor {
 	private readonly llm: MemoryLlm;
 
@@ -304,22 +385,57 @@ export class ConsolidationExtractor {
 		this.llm = llm;
 	}
 
-	async extractPendingItems(options: ExtractPendingOptions): Promise<string> {
+	async extract(options: ExtractPendingOptions): Promise<ExtractionPayload> {
 		const prompt = buildExtractionPrompt(options);
 		const raw = await this.llm.chat(EXTRACTION_SYSTEM, prompt, 4096);
 		const parsed = parseJsonLoose(raw);
 		const record =
 			parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+		const historyEntries = normalizeHistoryEntries(record.history_entries);
 		const items = record.pending_items;
 		if (items === undefined) throw new Error("pending_items missing from extraction output");
-		return formatPendingItems(items);
+		return { historyEntries, pendingItems: formatPendingItems(items) };
+	}
+
+	/** 兼容旧入口:只返回 PENDING 行文本。 */
+	async extractPendingItems(options: ExtractPendingOptions): Promise<string> {
+		return (await this.extract(options)).pendingItems;
 	}
 }
 
 export interface ConsolidateSessionResult {
 	extracted: string;
+	historyEntries: HistoryEntry[];
 	consolidated: number;
 	cursor: number;
+	sourceRef: string;
+}
+
+/**
+ * 向量层桥接载荷:markdown 写入完成后交给 host ConsolidationBridge。
+ * history_entries 与 conversation 供 event 写入与第二遍隐式长期提取使用。
+ */
+export interface ConsolidatedPayload {
+	/** 本次 consolidation 窗口的 source_ref(与 PENDING 幂等键一致)。 */
+	sourceRef: string;
+	historyEntries: HistoryEntry[];
+	/** 窗口对话文本("[ts] ROLE: content"),隐式长期提取只允许依据 USER 原话。 */
+	conversation: string;
+	/** 来源会话的渠道作用域;无法推断时为空字符串(全局 scope)。 */
+	scope: { channel: string; chatId: string };
+}
+
+/** 从会话 key / jsonl 路径启发式推断 channel/chatId(形如 "<channel>:<chatId>.jsonl")。 */
+export function parseSessionScope(sessionKey: string): { channel: string; chatId: string } | undefined {
+	const base = basename(sessionKey).replace(/\.jsonl$/i, "");
+	const colon = base.indexOf(":");
+	if (colon <= 0) return undefined;
+	const channel = base.slice(0, colon).trim();
+	const chatId = base.slice(colon + 1).trim();
+	if (!channel || !chatId) return undefined;
+	// Windows 盘符("C:foo")不是渠道。
+	if (/^[A-Za-z]:/.test(base)) return undefined;
+	return { channel, chatId };
 }
 
 export interface ConsolidateMessagesOptions {
@@ -330,6 +446,10 @@ export interface ConsolidateMessagesOptions {
 	messages: SessionMessageLike[];
 	cursorStore: SessionCursorStore;
 	config?: ConsolidationConfig;
+	/** 向量层桥接回调:markdown 写入后、游标推进前调用;抛错则游标不推进,下轮重试(幂等)。 */
+	onConsolidated?: (payload: ConsolidatedPayload) => Promise<void> | void;
+	/** 显式作用域解析;缺省按会话文件名启发式推断(parseSessionScope)。 */
+	resolveScope?: (sessionFile: string) => { channel: string; chatId: string } | undefined;
 }
 
 /** 读取一个会话 jsonl 文件为消息列表。 */
@@ -363,7 +483,7 @@ export function readSessionJsonl(sessionFile: string): SessionMessageLike[] {
 	return messages;
 }
 
-/** 对内存中的消息列表 consolidation:选窗 → 提取 → 幂等追加 → 推进游标。 */
+/** 对内存中的消息列表 consolidation:选窗 → 提取 → 幂等追加 → 桥接回调 → 推进游标。 */
 export async function consolidateMessages(options: ConsolidateMessagesOptions): Promise<ConsolidateSessionResult> {
 	const { store, llm, sessionKey, messages, cursorStore, config = {} } = options;
 	const keepCount = config.keepCount ?? DEFAULT_KEEP_COUNT;
@@ -378,18 +498,24 @@ export async function consolidateMessages(options: ConsolidateMessagesOptions): 
 		minNewMessages,
 		force: config.force,
 	});
-	if (!window) return { extracted: "", consolidated: 0, cursor };
+	if (!window) return { extracted: "", historyEntries: [], consolidated: 0, cursor, sourceRef: "" };
 
 	const limited = limitWindowByChars(window, maxChars);
 	const conversation = formatConversation(limited.selected);
 	if (!conversation.trim()) {
 		cursorStore.setCursor(sessionKey, limited.consolidateUpTo);
-		return { extracted: "", consolidated: limited.selected.length, cursor: limited.consolidateUpTo };
+		return {
+			extracted: "",
+			historyEntries: [],
+			consolidated: limited.selected.length,
+			cursor: limited.consolidateUpTo,
+			sourceRef: "",
+		};
 	}
 
 	const currentMemory = store.readLongTerm();
 	const extractor = new ConsolidationExtractor(llm);
-	const extracted = await extractor.extractPendingItems({
+	const extracted = await extractor.extract({
 		conversation,
 		currentMemory,
 		recentContext: store.readRecentContext() || undefined,
@@ -398,20 +524,38 @@ export async function consolidateMessages(options: ConsolidateMessagesOptions): 
 	const ids = limited.selected.map((message) => message.id).filter((id): id is string => Boolean(id));
 	const sourceRef =
 		ids.length > 0 ? JSON.stringify(ids) : `${basename(sessionKey)}:${cursor}-${limited.consolidateUpTo}`;
-	if (extracted) {
-		store.appendPendingOnce(extracted, { sourceRef, kind: "pending_items" });
+	if (extracted.pendingItems) {
+		store.appendPendingOnce(extracted.pendingItems, { sourceRef, kind: "pending_items" });
+	}
+	// 向量层同步在游标推进前完成:失败则游标不推进,下轮按 source_ref 幂等重试。
+	if (options.onConsolidated) {
+		const scope = options.resolveScope?.(sessionKey) ?? parseSessionScope(sessionKey) ?? { channel: "", chatId: "" };
+		await options.onConsolidated({
+			sourceRef,
+			historyEntries: extracted.historyEntries,
+			conversation,
+			scope,
+		});
 	}
 	cursorStore.setCursor(sessionKey, limited.consolidateUpTo);
-	return { extracted, consolidated: limited.selected.length, cursor: limited.consolidateUpTo };
+	return {
+		extracted: extracted.pendingItems,
+		historyEntries: extracted.historyEntries,
+		consolidated: limited.selected.length,
+		cursor: limited.consolidateUpTo,
+		sourceRef,
+	};
 }
 
-/** 单会话 consolidation:选窗 → 提取 → 幂等追加 → 推进游标。 */
+/** 单会话 consolidation:选窗 → 提取 → 幂等追加 → 桥接回调 → 推进游标。 */
 export async function consolidateSession(options: {
 	store: MarkdownMemoryStore;
 	llm: MemoryLlm;
 	sessionFile: string;
 	cursorStore: SessionCursorStore;
 	config?: ConsolidationConfig;
+	onConsolidated?: ConsolidateMessagesOptions["onConsolidated"];
+	resolveScope?: ConsolidateMessagesOptions["resolveScope"];
 }): Promise<ConsolidateSessionResult> {
 	return consolidateMessages({
 		store: options.store,
@@ -420,6 +564,8 @@ export async function consolidateSession(options: {
 		messages: readSessionJsonl(options.sessionFile),
 		cursorStore: options.cursorStore,
 		config: options.config,
+		onConsolidated: options.onConsolidated,
+		resolveScope: options.resolveScope,
 	});
 }
 
