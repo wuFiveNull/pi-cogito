@@ -1,4 +1,4 @@
-import type { FileSystem, SessionCreateOptions, SessionMetadata } from "@earendil-works/pi-agent-core";
+import type { FileSystem, SessionCreateOptions, SessionMetadata } from "@cogito/agent-core";
 
 /** Result of a prepared SQLite statement execution. */
 export interface SqliteRunResult {
@@ -20,6 +20,11 @@ export interface SqliteDatabase {
 	exec(sql: string): Promise<void>;
 	prepare(sql: string): SqliteStatement;
 	transaction<T>(fn: () => Promise<T>): Promise<T>;
+	/**
+	 * Load a native SQLite extension (e.g. sqlite-vec) into this connection.
+	 * Implementations may reject this when extension loading was not enabled at open time.
+	 */
+	loadExtension?(path: string): Promise<void>;
 	close(): Promise<void>;
 }
 

@@ -1,4 +1,5 @@
-import { type ImageContent, type TextContent, type Usage, uuidv7 } from "@earendil-works/pi-ai";
+import type { ImageContent, TextContent, Usage } from "@cogito/ai";
+import { uuidv7 } from "@cogito/ai/utils/uuid";
 import type { AgentMessage } from "../../types.ts";
 import { createBranchSummaryMessage, createCompactionSummaryMessage, createCustomMessage } from "../messages.ts";
 import type {

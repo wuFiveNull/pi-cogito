@@ -1,0 +1,20 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"outDir": "./dist",
+		"paths": {
+			"@cogito/agent-core": ["../agent/dist/index.d.ts"],
+			"@cogito/agent-core/node": ["../agent/dist/node.d.ts"],
+			"@cogito/ai": ["../ai/dist/index.d.ts"],
+			"@cogito/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"@cogito/gateway": ["../gateway/dist/index.d.ts"],
+			"@cogito/gate": ["../gate/dist/index.d.ts"],
+			"@cogito/drift": ["../drift/dist/index.d.ts"],
+			"@cogito/host": ["../host/dist/index.d.ts"],
+			"@cogito/host/*": ["../host/dist/*.d.ts"],
+			"@cogito/mcp": ["../mcp/dist/index.d.ts"]
+		}
+	},
+	"include": ["src/**/*.ts"]
+}

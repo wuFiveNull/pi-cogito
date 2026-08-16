@@ -1,0 +1,17 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "./dist",
+		"paths": {
+			"@cogito/agent-core": ["../agent/dist/index.d.ts"],
+			"@cogito/agent-core/sqlite": ["../agent/dist/sqlite.d.ts", "../agent/src/sqlite.ts"],
+			"@cogito/agent-core/*": ["../agent/dist/*.d.ts"],
+			"@cogito/ai": ["../ai/dist/index.d.ts"],
+			"@cogito/ai/providers/embeddings/*": ["../ai/dist/providers/embeddings/*.d.ts"],
+			"@cogito/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
+		},
+		"rootDir": "./src"
+	},
+	"include": ["src/**/*.ts", "src/**/*.d.ts"],
+	"exclude": ["node_modules", "dist"]
+}

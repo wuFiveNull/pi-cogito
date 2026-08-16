@@ -289,6 +289,10 @@ class SessionList implements Component, Focusable {
 	private filteredSessions: FlatSessionNode[] = [];
 	private selectedIndex: number = 0;
 	private searchInput: Input;
+
+	private indexSearch: ((query: string) => Promise<Map<string, number> | undefined>) | undefined;
+
+	private searchToken = 0;
 	private showCwd = false;
 	private sortMode: SortMode = "threaded";
 	private nameFilter: NameFilter = "all";
@@ -326,6 +330,7 @@ class SessionList implements Component, Focusable {
 		nameFilter: NameFilter,
 		keybindings: KeybindingsManager,
 		currentSessionFilePath?: string,
+		indexSearch?: (query: string) => Promise<Map<string, number> | undefined>,
 	) {
 		this.allSessions = sessions;
 		this.filteredSessions = [];
@@ -334,6 +339,7 @@ class SessionList implements Component, Focusable {
 		this.sortMode = sortMode;
 		this.nameFilter = nameFilter;
 		this.keybindings = keybindings;
+		this.indexSearch = indexSearch;
 		this.currentSessionCanonicalPath = canonicalizePath(currentSessionFilePath);
 		this.filterSessions("");
 
@@ -373,17 +379,59 @@ class SessionList implements Component, Focusable {
 			// Threaded mode without search: show tree structure
 			const roots = buildSessionTree(nameFiltered);
 			this.filteredSessions = flattenSessionTree(roots);
+		} else if (this.indexSearch && trimmed) {
+			// Index-backed search: query the sqlite index, fall back to memory matching.
+			void this.applyIndexSearch(nameFiltered, trimmed);
+			return;
 		} else {
 			// Other modes or with search: flat list
-			const filtered = filterAndSortSessions(nameFiltered, query, this.sortMode, "all");
-			this.filteredSessions = filtered.map((session) => ({
+			this.applyMemoryFilter(nameFiltered, query, undefined);
+		}
+		this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.filteredSessions.length - 1));
+	}
+
+	private async applyIndexSearch(nameFiltered: SessionInfo[], query: string): Promise<void> {
+		const token = ++this.searchToken;
+		const scores = await this.indexSearch?.(query);
+		if (token !== this.searchToken) return; // Stale response: a newer query is in flight.
+		this.applyMemoryFilter(nameFiltered, query, scores);
+		this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.filteredSessions.length - 1));
+	}
+
+	private applyMemoryFilter(
+		nameFiltered: SessionInfo[],
+		query: string,
+		indexScores: Map<string, number> | undefined,
+	): void {
+		const memoryFiltered = filterAndSortSessions(nameFiltered, query, this.sortMode, "all");
+		if (!indexScores || indexScores.size === 0) {
+			this.filteredSessions = memoryFiltered.map((session) => ({
 				session,
 				depth: 0,
 				isLast: true,
 				ancestorContinues: [],
 			}));
+			return;
 		}
-		this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, this.filteredSessions.length - 1));
+
+		// Index hits first (by score, lower is better), memory-matched misses after.
+		const byId = new Map(nameFiltered.map((session) => [session.id, session]));
+		const hits: SessionInfo[] = [];
+		const seen = new Set<string>();
+		for (const [sessionId] of [...indexScores.entries()].sort((a, b) => a[1] - b[1])) {
+			const session = byId.get(sessionId);
+			if (!session) continue;
+			hits.push(session);
+			seen.add(sessionId);
+		}
+		const misses = memoryFiltered.filter((session) => !seen.has(session.id));
+		const merged = [...hits, ...misses];
+		this.filteredSessions = merged.map((session) => ({
+			session,
+			depth: 0,
+			isLast: true,
+			ancestorContinues: [],
+		}));
 	}
 
 	private setConfirmingDeletePath(path: string | null): void {
@@ -759,6 +807,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			keybindings?: KeybindingsManager;
 		},
 		currentSessionFilePath?: string,
+		indexSearch?: (query: string) => Promise<Map<string, number> | undefined>,
 	) {
 		super();
 		this.keybindings = options?.keybindings ?? KeybindingsManager.create();
@@ -779,6 +828,7 @@ export class SessionSelectorComponent extends Container implements Focusable {
 			this.nameFilter,
 			this.keybindings,
 			currentSessionFilePath,
+			indexSearch,
 		);
 
 		this.buildBaseLayout(this.sessionList);

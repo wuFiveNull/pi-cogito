@@ -1,0 +1,48 @@
+{
+	"name": "@cogito/mcp",
+	"version": "0.83.0",
+	"description": "Shared MCP (Model Context Protocol) client + server library for pi modules",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "node -e \"import('node:fs/promises').then(fs=>fs.rm('dist',{recursive:true,force:true}))\"",
+		"build": "tsgo -p tsconfig.build.json",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"keywords": [
+		"pi",
+		"mcp",
+		"model-context-protocol",
+		"client"
+	],
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/earendil-works/pi.git",
+		"directory": "packages/mcp"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"dependencies": {
+		"@cogito/ai": "^0.83.0",
+		"@modelcontextprotocol/sdk": "1.30.0",
+		"ajv": "8.20.0",
+		"ajv-formats": "3.0.1",
+		"cross-spawn": "7.0.6",
+		"open": "10.2.0",
+		"zod": "4.4.3"
+	}
+}

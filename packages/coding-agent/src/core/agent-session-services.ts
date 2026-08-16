@@ -4,6 +4,8 @@ import type { Model } from "@earendil-works/pi-ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import type { ExtensionSqlite } from "./extensions/sqlite.ts";
+import type { SessionSearchHit } from "./extensions/types.ts";
 import { ModelRuntime } from "./model-runtime.ts";
 import {
 	DefaultResourceLoader,
@@ -61,6 +63,13 @@ export interface CreateAgentSessionFromServicesOptions {
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
 	customTools?: ToolDefinition[];
+	/** Shared extensions sqlite (audit-logged) + read-only index view. */
+	extensionSqlite?: ExtensionSqlite;
+	/** Session search callback exposed to extensions as ctx.searchSessions. */
+	searchSessions?: (
+		query: string,
+		options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+	) => Promise<SessionSearchHit[]>;
 }
 
 /**
@@ -215,5 +224,7 @@ export async function createAgentSessionFromServices(
 		noTools: options.noTools,
 		customTools: options.customTools,
 		sessionStartEvent: options.sessionStartEvent,
+		extensionSqlite: options.extensionSqlite,
+		searchSessions: options.searchSessions,
 	});
 }

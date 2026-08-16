@@ -1,0 +1,39 @@
+{
+	"name": "@cogito/gate",
+	"version": "0.83.0",
+	"description": "gate: three-process drift gate + shared drift scheduling (proactive/drift share this layer; neither depends on the other)",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "node -e \"import('node:fs/promises').then(fs=>fs.rm('dist',{recursive:true,force:true}))\"",
+		"build": "tsgo -p tsconfig.build.json",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"keywords": [
+		"pi",
+		"drift",
+		"gate",
+		"background"
+	],
+	"author": "Earendil Works",
+	"license": "MIT",
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"dependencies": {
+		"@cogito/ai": "0.83.0",
+		"minimatch": "10.2.5"
+	}
+}

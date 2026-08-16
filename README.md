@@ -1,113 +1,104 @@
-<p align="center">
-  <a href="https://pi.dev">
-    <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">
-  </a>
-</p>
-<p align="center">
-  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
-  <a href="https://www.npmjs.com/package/@earendil-works/pi-coding-agent"><img alt="npm" src="https://img.shields.io/npm/v/@earendil-works/pi-coding-agent?style=flat-square" /></a>
-</p>
+# Cogito
 
-> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Cogito 是一个私人 AI 助手：通过 IM 渠道（飞书、QQ、Web）与你交流，在空闲时执行 drift 任务，并主动推送有价值的信息。它没有 CLI 和 TUI，唯一的前端是一个 Web dashboard。
 
-# Pi Agent Harness
+本项目是 [earendil-works/pi](https://github.com/earendil-works/pi)（pi-mono）的一个 fork 改造：保留了 agent 运行时，去掉了 CLI/TUI/远程会话协议等，新增了 IM 网关、主动推送（proactive）和空闲任务（drift）三个常驻守护进程。
 
-This is the home of the Pi agent harness project including our self extensible coding agent.
+## 架构
 
-* **[@earendil-works/pi-coding-agent](packages/coding-agent)**: Interactive coding agent CLI
-* **[@earendil-works/pi-agent-core](packages/agent)**: Agent runtime with tool calling and state management
-* **[@earendil-works/pi-ai](packages/ai)**: Unified multi-provider LLM API (OpenAI, Anthropic, Google, …)
-
-To learn more about Pi:
-
-* [Visit pi.dev](https://pi.dev), the project website with demos
-* [Read the documentation](https://pi.dev/docs/latest), but you can also ask the agent to explain itself
-
-## All Packages
-
-| Package | Description |
-|---------|-------------|
-| **[@earendil-works/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
-| **[@earendil-works/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
-| **[@earendil-works/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
-| **[@earendil-works/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
-
-For Slack/chat automation and workflows see [earendil-works/pi-chat](https://github.com/earendil-works/pi-chat).
-
-## Permissions & Containerization
-
-Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access. By default, it runs with the permissions of the user and process that launched it.
-
-If you need stronger boundaries, containerize or sandbox Pi. See [packages/coding-agent/docs/containerization.md](packages/coding-agent/docs/containerization.md) for three patterns:
-
-- **Gondolin extension**: keep `pi` and provider auth on the host while routing built-in tools and `!` commands into a local Linux micro-VM.
-- **Plain Docker**: run the whole `pi` process in a local container for simple isolation.
-- **OpenShell**: run the whole `pi` process in a policy-controlled sandbox.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [AGENTS.md](AGENTS.md) for project-specific rules (for both humans and agents).  Longer term plans for Pi can also be found in [RFCs](https://rfc.earendil.com/keyword/pi/).
-
-## Development
-
-```bash
-npm install --ignore-scripts  # Install all dependencies without running lifecycle scripts
-npm run build         # Refresh model data, then build all packages
-npm run build:offline # Rebuild using existing model data without network access
-npm run check         # Lint, format, and type check
-./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pi-test.sh         # Run pi from sources (can be run from any directory)
+```
+IM 渠道 (飞书 / QQ / Web)
+        │
+        ▼
+┌───────────────────┐     ┌──────────────────────────┐
+│  gateway          │     │  ui (Web dashboard)       │
+│  (scripts/        │────▶│  聊天/知识与运行/监控/设置  │
+│   cogito-gateway) │     └──────────────────────────┘
+└─────────┬─────────┘
+          │ runChatModule (@cogito/chat)
+          ▼
+┌───────────────────┐
+│  chat             │  聊天模块：每会话 AgentSession、流式回复、
+│  (@cogito/chat)   │  记忆/推送/网络/定时工具、web 面板
+└─────────┬─────────┘
+          │ createAgentSession
+          ▼
+┌───────────────────┐
+│  host             │  无头 agent 运行时（扩展系统、会话、工具）
+│  (@cogito/host)   │
+└─────────┬─────────┘
+          │
+┌─────────▼─────────────────────────────┐
+│  proactive ──▶ gate ──▶ drift          │  三进程常驻守护
+│  主动推送 / 判断打扰 / 空闲任务          │  (systemd 或 scripts/run-daemons.sh)
+└───────────────────────────────────────┘
 ```
 
-## Building standalone binaries from release source
+底层共享库：`@cogito/ai`（统一 LLM API）、`@cogito/agent-core`（agent 运行时）、`@cogito/mcp`（MCP 客户端/服务端）、`@cogito/storage-sqlite-node`（会话存储）。
 
-GitHub releases include a versioned source archive covered by the release's `SHA256SUMS` file. Extract it and run the same build script used for the official standalone binaries:
+## 包一览
+
+| 包 | 作用 |
+|---|---|
+| `@cogito/ai` (`packages/ai`) | 统一多 provider LLM API（OpenAI/Anthropic/Google/Mistral/Bedrock 等）、模型发现、OAuth |
+| `@cogito/agent-core` (`packages/agent`) | 通用 agent 运行时：工具调用、状态管理、附件 |
+| `@cogito/storage-sqlite-node` (`packages/storage/sqlite-node`) | 会话的 sqlite 存储后端 |
+| `@cogito/mcp` (`packages/mcp`) | 共享 MCP client + server 库 |
+| `@cogito/host` (`packages/host`) | 无头 agent 运行时 + 扩展系统（gateway/proactive/drift 的宿主） |
+| `@cogito/chat` (`packages/chat`) | 聊天模块（以 host 为底座）：每会话 AgentSession、流式回复、记忆/推送/网络/定时工具，入口 `scripts/cogito-gateway.ts` |
+| `@cogito/gateway` (`packages/gateway`) | 统一 IM 通道抽象：飞书、QQ/OneBot、Web 等 |
+| `@cogito/gate` (`packages/gate`) | proactive 与 drift 之间的共享门控/调度层 |
+| `@cogito/proactive` (`packages/proactive`) | 主动推送引擎：轮询来源、判断是否打扰、证据优先投递 |
+| `@cogito/drift` (`packages/drift`) | 空闲时间后台任务引擎（akashic drift_flow 移植）：Scan→Prepare→Execute→Finish |
+| `@cogito/ui` (`packages/ui`) | Web dashboard 托管层（挂载在 gateway 的 web channel 上） |
+
+## 配置
+
+- `config.json`：gateway 通道配置（feishu / qq / web）与 proactive 投递目标
+- `~/.cogito/agent/`：agent 主目录（`auth.json`、`models.json`、会话、扩展、skills）
+- `.cogito/`：仓库级扩展（`extensions/`）、memory、prompts、skills
+- `.run/`：运行时状态（日志、sqlite、pid）
+
+## 指南
+
+- [docs/drift-guide.md](docs/drift-guide.md) — Drift 空闲任务:写自己的 SKILL.md、案例技能、工具表
+- [docs/proactive-guide.md](docs/proactive-guide.md) — Proactive 主动推送:生命周期、数据源插件、energy 调度、验证清单
+
+## 运行
 
 ```bash
-VERSION="<release-version>"
-tar -xzf "pi-${VERSION}-source.tar.gz"
-cd "pi-${VERSION}"
-./scripts/build-binaries.sh --offline-model-data --platform linux-x64 --out "$PWD/out"
+npm install --ignore-scripts
+npm run build         # 构建所有包
+npm run check         # lint + 类型检查
+
+# 三进程守护（gateway + proactive + drift）
+scripts/run-daemons.sh start
+scripts/run-daemons.sh status
+scripts/run-daemons.sh logs
+scripts/run-daemons.sh stop
+
+# 或作为 systemd 用户服务（见 systemd/README.md）
+systemctl --user enable --now cogito-gateway cogito-proactive cogito-drift
 ```
 
-The source archive includes the generated provider model data used for the release. `--offline-model-data` builds with that snapshot instead of refreshing it from live provider catalogs. The script still installs dependencies, builds the monorepo, compiles the Bun executable, and stages its runtime assets. Package maintainers who provide dependencies separately can pass `--skip-install --skip-deps`.
+启动后：
 
-## Supply-chain hardening
+- IM 渠道按 `config.json` 的通道配置工作
+- Web dashboard：`http://127.0.0.1:8787/`（聊天 / 知识与运行 / 监控 / 设置）
+- `/api/health` 为公开存活探针；管理端点需要 `Authorization: Bearer <token>`
 
-We treat npm dependency changes as reviewed code changes.
+## 开发
 
-- Direct external dependencies are pinned to exact versions. Internal workspace packages remain version-ranged.
-- `.npmrc` sets `save-exact=true` and `min-release-age=2` to avoid same-day dependency releases during npm resolution.
-- `package-lock.json` is the dependency ground truth. Pre-commit blocks accidental lockfile commits unless `PI_ALLOW_LOCKFILE_CHANGE=1` is set.
-- `npm run check` verifies pinned direct deps, native TypeScript import compatibility, and the generated coding-agent shrinkwrap.
-- The published CLI package includes `packages/coding-agent/npm-shrinkwrap.json`, generated from the root lockfile, to pin transitive deps for npm users.
-- Release smoke tests use `npm run release:local` to build, pack, and create isolated npm and Bun installs outside the repo before tagging a release.
-- Local release installs, documented npm installs, and `pi update --self` use `--ignore-scripts` where supported.
-- CI installs with `npm ci --ignore-scripts`, and a scheduled GitHub workflow runs `npm audit --omit=dev` plus `npm audit signatures --omit=dev`.
-- Shrinkwrap generation has an explicit allowlist for dependency lifecycle scripts; new lifecycle-script deps fail checks until reviewed.
+```bash
+npm run check         # biome + tsgo 全仓检查
+./test.sh             # 跑测试（无 LLM 依赖）
+```
 
-## Share your OSS coding agent sessions
+## 备注
 
-If you use Pi or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
-
-I regularly publish my own `pi-mono` work sessions here:
-
-- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
+- `packages/coding-agent` 保留在仓库中作为参考代码，已不再被任何模块引用，也不参与构建/发布。
+- 本仓库的完整历史备份在 `/home/wu/projects/pi-cogito`（只读）。
 
 ## License
 
 MIT
-
-<p align="center">
-  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
-  <br /><br />
-  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
-</p>

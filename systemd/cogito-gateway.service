@@ -1,0 +1,20 @@
+[Unit]
+Description=Cogito channel gateway
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/cogito
+EnvironmentFile=%h/.config/cogito/gateway.env
+Environment=COGITO_PROJECT_DIR=%h/projects/cogito
+Environment=GATEWAY_CONFIG=%h/projects/cogito/config.json
+ExecStart=/usr/bin/env node --import tsx scripts/cogito-gateway.ts
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=90s
+KillSignal=SIGTERM
+UMask=0077
+
+[Install]
+WantedBy=default.target

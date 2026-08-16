@@ -1,0 +1,20 @@
+[Unit]
+Description=Cogito proactive daemon (three-process mode)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/cogito
+Environment=COGITO_PROJECT_DIR=%h/projects/cogito
+Environment=PI_AGENT_DIR=%h/.cogito/agent
+EnvironmentFile=%h/.config/cogito/gateway.env
+ExecStart=/usr/bin/env node --import tsx packages/proactive/scripts/daemon.ts .run/proactive.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=90s
+KillSignal=SIGTERM
+UMask=0077
+
+[Install]
+WantedBy=default.target

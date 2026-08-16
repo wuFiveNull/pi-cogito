@@ -167,6 +167,24 @@ export {
 } from "./core/extensions/index.ts";
 // Footer data provider (git branch + extension statuses - data not otherwise available to extensions)
 export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
+export type { MemoryEngine, MemoryEngineOptions } from "./core/memory/index.ts";
+// Memory engine
+export { createMemoryEngine, Memorizer, MemoryStore, Retriever } from "./core/memory/index.ts";
+export type {
+	BehaviorUpdate,
+	InjectionBlock,
+	MemoryHit,
+	MemoryScope,
+	MemoryStoreOptions,
+	MemoryStoreSearchOptions,
+	MemoryType,
+	RetrieveOptions,
+	RetrieverOptions,
+	SaveItemOptions,
+	SaveItemWithSupersedeOptions,
+	TextEmbedder,
+} from "./core/memory/types.ts";
+export { defaultMemoryType, isMemoryType, MEMORY_TYPES } from "./core/memory/types.ts";
 export { convertToLlm } from "./core/messages.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {

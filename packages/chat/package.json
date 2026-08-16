@@ -1,0 +1,50 @@
+{
+	"name": "@cogito/chat",
+	"version": "0.83.0",
+	"description": "chat: IM chat module on the host base (gateway inbound -> agent session -> outbound)",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "node -e \"import('node:fs/promises').then(fs=>fs.rm('dist',{recursive:true,force:true}))\"",
+		"build": "tsgo -p tsconfig.build.json",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"keywords": [
+		"pi",
+		"chat",
+		"im",
+		"gateway",
+		"agent"
+	],
+	"dependencies": {
+		"@cogito/agent-core": "0.83.0",
+		"@cogito/ai": "0.83.0",
+		"@cogito/gate": "0.83.0",
+		"@cogito/gateway": "0.83.0",
+		"@cogito/host": "0.83.0",
+		"@cogito/ui": "0.83.0",
+		"typebox": "1.3.7"
+	},
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/earendil-works/pi.git",
+		"directory": "packages/chat"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}

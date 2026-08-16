@@ -1,0 +1,34 @@
+{
+  "sources": {
+    "dailyhot": {
+      "enabled": true,
+      "intervalMin": 30
+    }
+  },
+  "delivery": {
+    "enabled": false
+  },
+  "drift": {
+    "enabled": true,
+    "maxSteps": 8,
+    "minIntervalHours": 3,
+    "webPolicy": {
+      "allowPrivateNetwork": false,
+      "maxRedirectHops": 0
+    }
+  },
+  "retention": {
+    "maxItemAgeDays": 30,
+    "maxDeliveryAgeDays": 30,
+    "maxDeliveries": 1000,
+    "maxTickLogAgeDays": 30,
+    "maxTickLogs": 1000,
+    "maxSourceFailureAgeDays": 30,
+    "maxSourceFailures": 2000,
+    "maxQuarantineAgeDays": 30,
+    "maxContextOnlyAgeDays": 30,
+    "maxDailyCountAgeDays": 90,
+    "driftMaxAgeDays": 90,
+    "driftMaxRuns": 1000
+  }
+}

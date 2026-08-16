@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "paths": {
+      "@cogito/agent-core": ["../agent/src/index.ts"],
+      "@cogito/agent-core/node": ["../agent/src/node.ts"],
+      "@cogito/ai": ["../ai/src/index.ts"],
+      "@cogito/ai/*": ["../ai/src/*.ts", "../ai/src/providers/*.ts"],
+      "@cogito/gateway": ["../gateway/src/index.ts"],
+      "@cogito/gate": ["../gate/src/index.ts"],
+      "@cogito/drift": ["../drift/src/index.ts"],
+      "@cogito/host": ["../host/src/index.ts"],
+      "@cogito/host/*": ["../host/src/*"],
+      "@cogito/mcp": ["../mcp/src/index.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.d.ts",
+    "src/**/*.d.ts"
+  ]
+}

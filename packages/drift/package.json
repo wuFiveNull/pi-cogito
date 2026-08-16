@@ -1,0 +1,46 @@
+{
+	"name": "@cogito/drift",
+	"version": "0.83.0",
+	"description": "drift: idle-time background task engine (drift skills, akashic drift_flow design)",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "node -e \"import('node:fs/promises').then(fs=>fs.rm('dist',{recursive:true,force:true}))\"",
+		"build": "tsgo -p tsconfig.build.json",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"keywords": [
+		"pi",
+		"drift",
+		"background",
+		"skills"
+	],
+	"dependencies": {
+		"@cogito/agent-core": "0.83.0",
+		"@cogito/ai": "0.83.0",
+		"@cogito/gate": "0.83.0",
+		"@cogito/host": "0.83.0",
+		"yaml": "2.9.0"
+	},
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/earendil-works/pi.git",
+		"directory": "packages/drift"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	}
+}

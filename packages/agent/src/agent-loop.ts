@@ -3,17 +3,14 @@
  * Transforms to Message[] only at the LLM call boundary.
  */
 
-import {
-	type AssistantMessage,
-	type Context,
-	EventStream,
-	type ToolResultMessage,
-	validateToolArguments,
-} from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, ToolResultMessage } from "@cogito/ai";
+import { EventStream } from "@cogito/ai/utils/event-stream";
+import { validateToolArguments } from "@cogito/ai/utils/validation";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
 	AgentEvent,
+	AgentLifecycleContext,
 	AgentLoopConfig,
 	AgentMessage,
 	AgentTool,
@@ -107,10 +104,21 @@ export async function runAgentLoop(
 	};
 
 	await emit({ type: "agent_start" });
+	const beforeTurn = await runLifecyclePhase(config, "before_turn", currentContext, newMessages, 0, signal);
+	await emit({
+		type: "before_turn",
+		context: beforeTurn.agentContext,
+		newMessages: beforeTurn.newMessages,
+		turnIndex: beforeTurn.turnIndex,
+	});
 	await emit({ type: "turn_start" });
 	for (const prompt of prompts) {
 		await emit({ type: "message_start", message: prompt });
 		await emit({ type: "message_end", message: prompt });
+	}
+	if (beforeTurn.abort) {
+		await endLifecycleAbortedTurn(currentContext, newMessages, config, beforeTurn.abort.reason, emit);
+		return newMessages;
 	}
 
 	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
@@ -136,7 +144,18 @@ export async function runAgentLoopContinue(
 	const currentContext: AgentContext = { ...context };
 
 	await emit({ type: "agent_start" });
+	const beforeTurn = await runLifecyclePhase(config, "before_turn", currentContext, newMessages, 0, signal);
+	await emit({
+		type: "before_turn",
+		context: beforeTurn.agentContext,
+		newMessages: beforeTurn.newMessages,
+		turnIndex: beforeTurn.turnIndex,
+	});
 	await emit({ type: "turn_start" });
+	if (beforeTurn.abort) {
+		await endLifecycleAbortedTurn(currentContext, newMessages, config, beforeTurn.abort.reason, emit);
+		return newMessages;
+	}
 
 	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
 	return newMessages;
@@ -163,6 +182,8 @@ async function runLoop(
 	let currentContext = initialContext;
 	let config = initialConfig;
 	let firstTurn = true;
+	let currentTurnIndex = 0;
+	let nextTurnIndex = 1;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -173,7 +194,27 @@ async function runLoop(
 		// Inner loop: process tool calls and steering messages
 		while (hasMoreToolCalls || pendingMessages.length > 0) {
 			if (!firstTurn) {
+				currentTurnIndex = nextTurnIndex;
+				nextTurnIndex++;
+				const beforeTurn = await runLifecyclePhase(
+					config,
+					"before_turn",
+					currentContext,
+					newMessages,
+					currentTurnIndex,
+					signal,
+				);
+				await emit({
+					type: "before_turn",
+					context: beforeTurn.agentContext,
+					newMessages: beforeTurn.newMessages,
+					turnIndex: beforeTurn.turnIndex,
+				});
 				await emit({ type: "turn_start" });
+				if (beforeTurn.abort) {
+					await endLifecycleAbortedTurn(currentContext, newMessages, config, beforeTurn.abort.reason, emit);
+					return;
+				}
 			} else {
 				firstTurn = false;
 			}
@@ -189,12 +230,32 @@ async function runLoop(
 				pendingMessages = [];
 			}
 
+			const beforeReasoning = await runLifecyclePhase(
+				config,
+				"before_reasoning",
+				currentContext,
+				newMessages,
+				currentTurnIndex,
+				signal,
+			);
+			if (beforeReasoning.abort) {
+				await endLifecycleAbortedTurn(currentContext, newMessages, config, beforeReasoning.abort.reason, emit);
+				return;
+			}
+
 			// Stream assistant response
 			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
 			newMessages.push(message);
+			await runLifecyclePhase(config, "after_reasoning", currentContext, newMessages, currentTurnIndex, signal, {
+				assistantMessage: message,
+			});
 
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
 				await emit({ type: "turn_end", message, toolResults: [] });
+				await runLifecyclePhase(config, "after_turn", currentContext, newMessages, currentTurnIndex, signal, {
+					assistantMessage: message,
+					toolResults: [],
+				});
 				await emit({ type: "agent_end", messages: newMessages });
 				return;
 			}
@@ -222,6 +283,10 @@ async function runLoop(
 			}
 
 			await emit({ type: "turn_end", message, toolResults });
+			await runLifecyclePhase(config, "after_turn", currentContext, newMessages, currentTurnIndex, signal, {
+				assistantMessage: message,
+				toolResults,
+			});
 
 			const nextTurnContext = {
 				message,
@@ -271,6 +336,62 @@ async function runLoop(
 		break;
 	}
 
+	await emit({ type: "agent_end", messages: newMessages });
+}
+
+async function runLifecyclePhase(
+	config: AgentLoopConfig,
+	phase: AgentLifecycleContext["phase"],
+	agentContext: AgentContext,
+	newMessages: AgentMessage[],
+	turnIndex: number,
+	signal: AbortSignal | undefined,
+	options: { assistantMessage?: AssistantMessage; toolResults?: ToolResultMessage[] } = {},
+): Promise<AgentLifecycleContext> {
+	const context: AgentLifecycleContext = {
+		phase,
+		agentContext,
+		newMessages,
+		turnIndex,
+		signal,
+		assistantMessage: options.assistantMessage,
+		toolResults: options.toolResults,
+		hints: [],
+		metadata: {},
+	};
+	return config.lifecycle ? await config.lifecycle.run(context) : context;
+}
+
+async function endLifecycleAbortedTurn(
+	context: AgentContext,
+	newMessages: AgentMessage[],
+	config: AgentLoopConfig,
+	reason: string,
+	emit: AgentEventSink,
+): Promise<void> {
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [{ type: "text", text: "" }],
+		api: config.model.api,
+		provider: config.model.provider,
+		model: config.model.id,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "error",
+		errorMessage: reason,
+		timestamp: Date.now(),
+	};
+	context.messages.push(message);
+	newMessages.push(message);
+	await emit({ type: "message_start", message });
+	await emit({ type: "message_end", message });
+	await emit({ type: "turn_end", message, toolResults: [] });
 	await emit({ type: "agent_end", messages: newMessages });
 }
 

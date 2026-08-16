@@ -1,0 +1,78 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "paths": {
+          "@cogito/ai": [
+                "../ai/src/index.ts"
+          ],
+          "@cogito/ai/oauth": [
+                "../ai/src/oauth.ts"
+          ],
+          "@cogito/ai/utils/*": [
+                "../ai/src/utils/*.ts"
+          ],
+          "@cogito/ai/api/*": [
+                "../ai/src/api/*.ts"
+          ],
+          "@cogito/ai/providers/embeddings/*": [
+                "../ai/src/providers/embeddings/*.ts"
+          ],
+          "@cogito/ai/*": [
+                "../ai/src/*.ts",
+                "../ai/src/providers/*.ts"
+          ],
+          "@cogito/ai/dist/*": [
+                "../ai/src/*"
+          ],
+          "@cogito/agent-core": [
+                "../agent/src/index.ts"
+          ],
+          "@cogito/agent-core/node": [
+                "../agent/src/node.ts"
+          ],
+          "@cogito/agent-core/sqlite": [
+                "../agent/src/sqlite.ts"
+          ],
+          "@cogito/agent-core/*": [
+                "../agent/src/*"
+          ],
+          "@cogito/host": [
+                "../host/src/index.ts"
+          ],
+          "@cogito/host/*": [
+                "../host/src/*"
+          ],
+          "@cogito/gate": [
+                "../gate/src/index.ts"
+          ],
+          "@cogito/gateway": [
+                "../gateway/src/index.ts"
+          ],
+          "@cogito/gateway/*": [
+                "../gateway/src/*"
+          ],
+          "@cogito/ui": [
+                "../ui/src/index.ts"
+          ],
+          "typebox": [
+                "./node_modules/typebox"
+          ]
+    }
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/*.d.ts",
+    "src/**/*.d.ts"
+  ]
+}

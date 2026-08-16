@@ -1,4 +1,5 @@
-import { contentText, type Model, type Models, type RetryCallbacks, type RetryPolicy } from "@earendil-works/pi-ai";
+import type { Model, Models, RetryCallbacks, RetryPolicy } from "@cogito/ai";
+import { contentText } from "@cogito/ai/utils/text";
 
 import type { AgentMessage } from "../../types.ts";
 import {

@@ -3,6 +3,9 @@
 	"compilerOptions": {
 		"rootDir": "src",
 		"outDir": "dist",
+		"paths": {
+			"@cogito/agent-core/sqlite": ["../../agent/dist/sqlite.d.ts", "../../agent/src/sqlite.ts"]
+		},
 		"declaration": true,
 		"emitDeclarationOnly": false,
 		"noEmit": false

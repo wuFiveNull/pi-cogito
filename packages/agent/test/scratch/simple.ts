@@ -1,8 +1,8 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createModels } from "@earendil-works/pi-ai";
-import { cloudflareAIGatewayProvider } from "@earendil-works/pi-ai/providers/cloudflare-ai-gateway";
-import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import { createModels } from "@cogito/ai";
+import { cloudflareAIGatewayProvider } from "@cogito/ai/providers/cloudflare-ai-gateway";
+import { openaiProvider } from "@cogito/ai/providers/openai";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
 import {
 	AgentHarness,

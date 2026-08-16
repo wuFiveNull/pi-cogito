@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"outDir": "./dist",
+		"paths": {
+			"@cogito/ai": ["../ai/dist/index.d.ts"],
+			"@cogito/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"]
+		}
+	},
+	"include": ["src/**/*.ts"]
+}

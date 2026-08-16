@@ -245,6 +245,7 @@ describe("AgentSession retry and event characterization", () => {
 
 		expect(normalizeEventOrder(harness.events)).toEqual([
 			"agent_start",
+			"before_turn",
 			"turn_start",
 			"message_start:user",
 			"message_end:user",
@@ -282,6 +283,7 @@ describe("AgentSession retry and event characterization", () => {
 		expect(toolRuns).toEqual(["hello"]);
 		expect(normalizeEventOrder(harness.events)).toEqual([
 			"agent_start",
+			"before_turn",
 			"turn_start",
 			"message_start:user",
 			"message_end:user",
@@ -293,6 +295,7 @@ describe("AgentSession retry and event characterization", () => {
 			"message_start:toolResult",
 			"message_end:toolResult",
 			"turn_end",
+			"before_turn",
 			"turn_start",
 			"message_start:assistant",
 			"message_update",

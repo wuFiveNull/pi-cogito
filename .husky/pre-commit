@@ -27,11 +27,15 @@ for file in $STAGED_FILES; do
 done
 
 if [ $RUN_BROWSER_SMOKE -eq 1 ]; then
-  echo "Running browser smoke check..."
-  npm run check:browser-smoke
-  if [ $? -ne 0 ]; then
-    echo "❌ Browser smoke check failed."
-    exit 1
+  if npm run --silent 2>/dev/null | grep -qx 'check:browser-smoke'; then
+    echo "Running browser smoke check..."
+    npm run check:browser-smoke
+    if [ $? -ne 0 ]; then
+      echo "❌ Browser smoke check failed."
+      exit 1
+    fi
+  else
+    echo "Skipping browser smoke check (check:browser-smoke script not defined)."
   fi
 fi
 

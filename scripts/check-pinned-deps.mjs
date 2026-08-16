@@ -22,7 +22,9 @@ function collectPackageJsonFiles(directory) {
 }
 
 function isInternalWorkspaceDependency(name) {
-	return name.startsWith("@earendil-works/pi-");
+	// @cogito/* is the live workspace scope; @earendil-works/pi-* is the legacy
+	// scope still referenced by the kept-but-unused packages/coding-agent.
+	return name.startsWith("@cogito/") || name.startsWith("@earendil-works/pi-");
 }
 
 function isNonRegistrySpecifier(specifier) {

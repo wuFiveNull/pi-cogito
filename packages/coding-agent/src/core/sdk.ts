@@ -7,6 +7,8 @@ import { AgentSession } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
+import type { ExtensionSqlite } from "./extensions/sqlite.ts";
+import type { SessionSearchHit } from "./extensions/types.ts";
 import { convertToLlm } from "./messages.ts";
 import { findInitialModel } from "./model-resolver.ts";
 import { ModelRuntime } from "./model-runtime.ts";
@@ -82,6 +84,13 @@ export interface CreateAgentSessionOptions {
 	settingsManager?: SettingsManager;
 	/** Session start event metadata for extension runtime startup. */
 	sessionStartEvent?: SessionStartEvent;
+	/** Shared extensions sqlite (audit-logged) + read-only index view. */
+	extensionSqlite?: ExtensionSqlite;
+	/** Session search callback exposed to extensions as ctx.searchSessions. */
+	searchSessions?: (
+		query: string,
+		options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+	) => Promise<SessionSearchHit[]>;
 }
 
 /** Result from createAgentSession */
@@ -386,6 +395,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		allowedToolNames,
 		excludedToolNames,
 		extensionRunnerRef,
+		extensionSqlite: options.extensionSqlite,
+		searchSessions: options.searchSessions,
 		sessionStartEvent: options.sessionStartEvent,
 	});
 	const extensionsResult = resourceLoader.getExtensions();

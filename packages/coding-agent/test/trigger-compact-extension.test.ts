@@ -10,6 +10,32 @@ function createContext(tokens: number | null, compact = vi.fn()): ExtensionConte
 		cwd: process.cwd(),
 		sessionManager: {} as ExtensionContext["sessionManager"],
 		modelRegistry: {} as ExtensionContext["modelRegistry"],
+		sqlite: {
+			exec: () => {
+				throw new Error("sqlite not available in this test context");
+			},
+			run: () => {
+				throw new Error("sqlite not available in this test context");
+			},
+			query: () => {
+				throw new Error("sqlite not available in this test context");
+			},
+			get: () => {
+				throw new Error("sqlite not available in this test context");
+			},
+			transaction: <T>(fn: () => T): T => fn(),
+		},
+		indexDb: {
+			query: () => {
+				throw new Error("indexDb not available in this test context");
+			},
+			get: () => {
+				throw new Error("indexDb not available in this test context");
+			},
+		},
+		searchSessions: async () => {
+			throw new Error("search not available in this test context");
+		},
 		model: undefined,
 		scopedModels: [],
 		isIdle: () => true,

@@ -1,0 +1,24 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"outDir": "./dist",
+		"paths": {
+			"@cogito/ai": ["../ai/dist/index.d.ts"],
+			"@cogito/ai/oauth": ["../ai/dist/oauth.d.ts"],
+			"@cogito/ai/utils/*": ["../ai/dist/utils/*.d.ts"],
+			"@cogito/ai/api/*": ["../ai/dist/api/*.d.ts"],
+			"@cogito/ai/providers/embeddings/*": ["../ai/dist/providers/embeddings/*.d.ts"],
+			"@cogito/ai/*": ["../ai/dist/*.d.ts", "../ai/dist/providers/*.d.ts"],
+			"@cogito/ai/dist/*": ["../ai/dist/*"],
+			"@cogito/agent-core": ["../agent/dist/index.d.ts"],
+			"@cogito/agent-core/node": ["../agent/dist/node.d.ts"],
+			"@cogito/agent-core/sqlite": ["../agent/dist/sqlite.d.ts"],
+			"@cogito/agent-core/*": ["../agent/dist/*.d.ts"],
+			"@cogito/gate": ["../gate/dist/index.d.ts"],
+			"@cogito/host": ["../host/dist/index.d.ts"],
+			"@cogito/host/*": ["../host/dist/*.d.ts"]
+		}
+	},
+	"include": ["src/**/*.ts"]
+}

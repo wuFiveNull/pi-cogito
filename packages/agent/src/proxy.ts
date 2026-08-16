@@ -4,17 +4,17 @@
  */
 
 // Internal import for JSON parsing utility
-import {
-	type AssistantMessage,
-	type AssistantMessageEvent,
-	type Context,
-	EventStream,
-	type Model,
-	parseStreamingJson,
-	type SimpleStreamOptions,
-	type StopReason,
-	type ToolCall,
-} from "@earendil-works/pi-ai";
+import type {
+	AssistantMessage,
+	AssistantMessageEvent,
+	Context,
+	Model,
+	SimpleStreamOptions,
+	StopReason,
+	ToolCall,
+} from "@cogito/ai";
+import { EventStream } from "@cogito/ai/utils/event-stream";
+import { parseStreamingJson } from "@cogito/ai/utils/json-parse";
 
 // Create stream class matching ProxyMessageEventStream
 class ProxyMessageEventStream extends EventStream<AssistantMessageEvent, AssistantMessage> {

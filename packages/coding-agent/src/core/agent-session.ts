@@ -71,7 +71,6 @@ import {
 	type ExtensionCommandContextActions,
 	type ExtensionErrorListener,
 	type ExtensionMode,
-	ExtensionRunner,
 	type ExtensionUIContext,
 	type InputSource,
 	type MessageEndEvent,
@@ -92,7 +91,9 @@ import {
 	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
-import { emitSessionShutdownEvent } from "./extensions/runner.ts";
+import { ExtensionRunner, emitSessionShutdownEvent } from "./extensions/runner.ts";
+import type { ExtensionSqlite } from "./extensions/sqlite.ts";
+import type { SessionSearchHit } from "./extensions/types.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
@@ -222,6 +223,13 @@ export interface AgentSessionConfig {
 	baseToolsOverride?: Record<string, AgentTool>;
 	/** Mutable ref used by Agent to access the current ExtensionRunner */
 	extensionRunnerRef?: { current?: ExtensionRunner };
+	/** Shared extensions sqlite (audit-logged) + read-only index view. */
+	extensionSqlite?: ExtensionSqlite;
+	/** Session search callback exposed to extensions as ctx.searchSessions. */
+	searchSessions?: (
+		query: string,
+		options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+	) => Promise<SessionSearchHit[]>;
 	/** Session start event metadata emitted when extensions bind to this runtime. */
 	sessionStartEvent?: SessionStartEvent;
 }
@@ -347,6 +355,13 @@ export class AgentSession {
 	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
 	private _cwd: string;
 	private _extensionRunnerRef?: { current?: ExtensionRunner };
+	private _extensionSqlite: ExtensionSqlite | undefined;
+	private _searchSessions:
+		| ((
+				query: string,
+				options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+		  ) => Promise<SessionSearchHit[]>)
+		| undefined;
 	private _initialActiveToolNames?: string[];
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
@@ -383,6 +398,8 @@ export class AgentSession {
 		this._cwd = config.cwd;
 		this._modelRuntime = config.modelRuntime;
 		this._extensionRunnerRef = config.extensionRunnerRef;
+		this._extensionSqlite = config.extensionSqlite;
+		this._searchSessions = config.searchSessions;
 		this._initialActiveToolNames = config.initialActiveToolNames;
 		this._allowedToolNames = config.allowedToolNames ? new Set(config.allowedToolNames) : undefined;
 		this._excludedToolNames = config.excludedToolNames ? new Set(config.excludedToolNames) : undefined;
@@ -2593,6 +2610,8 @@ export class AgentSession {
 			this._cwd,
 			this.sessionManager,
 			new ModelRegistry(this._modelRuntime),
+			this._extensionSqlite,
+			this._searchSessions,
 		);
 		if (this._extensionRunnerRef) {
 			this._extensionRunnerRef.current = this._extensionRunner;

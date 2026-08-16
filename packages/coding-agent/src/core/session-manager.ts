@@ -1041,11 +1041,18 @@ export class SessionManager {
 		}
 	}
 
+	/**
+	 * Optional dual-write hook invoked after an entry is appended in memory and
+	 * persisted (or queued for persistence). Defaults to undefined (no-op).
+	 */
+	onEntryAppended?: (entry: SessionEntry) => void;
+
 	private _appendEntry(entry: SessionEntry): void {
 		this.fileEntries.push(entry);
 		this.byId.set(entry.id, entry);
 		this.leafId = entry.id;
 		this._persist(entry);
+		this.onEntryAppended?.(entry);
 	}
 
 	/** Append a message as child of current leaf, then advance leaf. Returns entry id.

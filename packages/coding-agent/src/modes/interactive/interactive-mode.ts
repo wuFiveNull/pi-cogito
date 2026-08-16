@@ -90,6 +90,7 @@ import {
 import { DefaultPackageManager } from "../../core/package-manager.ts";
 import type { ResourceDiagnostic } from "../../core/resource-loader.ts";
 import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../core/session-cwd.ts";
+import { getSharedSessionIndexer, type SessionIndexSearcher } from "../../core/session-index/setup.ts";
 import { type SessionEntry, SessionManager, sessionEntryToContextMessages } from "../../core/session-manager.ts";
 import type { UiMode } from "../../core/settings-manager.ts";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
@@ -348,6 +349,7 @@ export function createInteractiveTui(options: InteractiveTuiOptions): TuiMainScr
 export class InteractiveMode {
 	private runtimeHost: AgentSessionRuntime;
 	private ui: TuiMainScreen | TuiAltScreen;
+	private sessionIndexSearcherPromise: Promise<SessionIndexSearcher | undefined> | undefined;
 	private loadedResourcesContainer: Container;
 	private chatContainer: Container;
 	private documentContainer: Container;
@@ -1869,6 +1871,13 @@ export class InteractiveMode {
 			hasUI: true,
 			cwd: this.sessionManager.getCwd(),
 			sessionManager: this.sessionManager,
+			get sqlite() {
+				return extensionRunner.getSqliteDb();
+			},
+			get indexDb() {
+				return extensionRunner.getIndexDb();
+			},
+			searchSessions: (query, options) => extensionRunner.searchSessions(query, options),
 			modelRegistry: extensionRunner.getModelRegistry(),
 			model: this.session.model,
 			scopedModels: this.session.scopedModels,
@@ -4860,6 +4869,19 @@ export class InteractiveMode {
 		});
 	}
 
+	private getSessionIndexSearcher(): Promise<SessionIndexSearcher | undefined> {
+		this.sessionIndexSearcherPromise ??= getSharedSessionIndexer(getAgentDir()).then((result) => {
+			if (!result) return undefined;
+			// Dual-write: mirror each appended entry into the sqlite index in real
+			// time. jsonl stays authoritative; ensureIndexed() reconciles on search.
+			this.sessionManager.onEntryAppended = (entry) => {
+				result.indexer.appendEntry(this.sessionManager.getSessionId(), this.sessionManager.getCwd(), entry);
+			};
+			return result.searcher;
+		});
+		return this.sessionIndexSearcherPromise;
+	}
+
 	private showSessionSelector(): void {
 		this.showSelector((done) => {
 			const selector = new SessionSelectorComponent(
@@ -4893,6 +4915,7 @@ export class InteractiveMode {
 				},
 
 				this.sessionManager.getSessionFile(),
+				async (query) => (await this.getSessionIndexSearcher())?.search(query),
 			);
 			return { component: selector, focus: selector };
 		});

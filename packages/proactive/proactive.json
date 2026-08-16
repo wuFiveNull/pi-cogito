@@ -1,0 +1,55 @@
+{
+  "interests": "我对 AI 开发、开源项目、国产大模型、编程技术感兴趣;对娱乐圈八卦、体育赛事、明星动态不感兴趣。",
+  "tick": {
+    "tickIntervalS0": 4800,
+    "tickIntervalS1": 2400,
+    "tickJitter": 0.3,
+    "scoreWeightEnergy": 0.4
+  },
+  "agentTick": {
+    "model": "deepseek-v4-flash",
+    "apiBaseUrl": "https://opencode.ai/zen/go/v1",
+    "maxSteps": 8,
+    "webFetchMaxChars": 8000
+  },
+  "resolve": {
+    "model": "deepseek-v4-flash",
+    "apiBaseUrl": "https://opencode.ai/zen/go/v1"
+  },
+  "safety": {
+    "deliveryDedupeHours": 24,
+    "messageDedupeRecentN": 5,
+    "contextOnlyDailyMax": 1
+  },
+  "delivery": {
+    "enabled": true
+  },
+  "drift": {
+    "enabled": true,
+    "maxSteps": 8,
+    "minIntervalHours": 3,
+    "model": "deepseek-v4-flash",
+    "apiBaseUrl": "https://opencode.ai/zen/go/v1"
+  },
+  "profile": {
+    "enabled": true,
+    "path": "packages/proactive/interests.json",
+    "sessionsDir": "/home/wu/.cogito/agent/sessions",
+    "refreshHours": 24,
+    "maxMessages": 50
+  },
+  "sources": {
+    "dailyhot": {
+      "enabled": true,
+      "intervalMin": 30,
+      "platforms": ["weibo", "github"]
+    },
+    "agent-reach": {
+      "enabled": false
+    },
+    "dailyhot-mcp": {
+      "enabled": true,
+      "intervalMin": 30
+    }
+  }
+}

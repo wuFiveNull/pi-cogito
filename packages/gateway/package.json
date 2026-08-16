@@ -1,0 +1,29 @@
+{
+	"name": "@cogito/gateway",
+	"version": "0.83.0",
+	"description": "Unified IM channel abstraction for pi modules (nanobot-style)",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": ["dist", "README.md"],
+	"scripts": {
+		"clean": "node -e \"import('node:fs/promises').then(fs=>fs.rm('dist',{recursive:true,force:true}))\"",
+		"build": "tsgo -p tsconfig.build.json",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"keywords": ["pi", "gateway", "channels", "im", "telegram", "discord", "slack", "websocket"],
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/earendil-works/pi.git",
+		"directory": "packages/gateway"
+	},
+	"engines": { "node": ">=22.19.0" }
+}

@@ -1,13 +1,13 @@
-import {
-	type AssistantMessage,
-	contentText,
-	type ImageContent,
-	type Model,
-	type Models,
-	type RetryCallbacks,
-	type RetryPolicy,
-	type UserMessage,
-} from "@earendil-works/pi-ai";
+import type {
+	AssistantMessage,
+	ImageContent,
+	Model,
+	Models,
+	RetryCallbacks,
+	RetryPolicy,
+	UserMessage,
+} from "@cogito/ai";
+import { contentText } from "@cogito/ai/utils/text";
 import { runAgentLoop } from "../agent-loop.ts";
 import type {
 	AgentContext,

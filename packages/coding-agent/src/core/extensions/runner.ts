@@ -12,6 +12,7 @@ import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
+import type { ExtensionIndexDatabase, ExtensionSqlite, ExtensionSqliteDatabase } from "./sqlite.ts";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -57,6 +58,7 @@ import type {
 	SessionBeforeForkResult,
 	SessionBeforeSwitchResult,
 	SessionBeforeTreeResult,
+	SessionSearchHit,
 	SessionShutdownEvent,
 	ToolCallEvent,
 	ToolCallEventResult,
@@ -273,6 +275,14 @@ export class ExtensionRunner {
 	private cwd: string;
 	private sessionManager: SessionManager;
 	private modelRegistry: ModelRegistry;
+	private extensionSqlite: ExtensionSqlite | undefined;
+	private searchSessionsFn:
+		| ((
+				query: string,
+				options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+		  ) => Promise<SessionSearchHit[]>)
+		| undefined;
+	private currentExtensionId: string | undefined;
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<any> | undefined = () => undefined;
 	private getScopedModels: () => readonly ScopedModel[] = () => [];
@@ -302,6 +312,11 @@ export class ExtensionRunner {
 		cwd: string,
 		sessionManager: SessionManager,
 		modelRegistry: ModelRegistry,
+		extensionSqlite?: ExtensionSqlite,
+		searchSessions?: (
+			query: string,
+			options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+		) => Promise<SessionSearchHit[]>,
 	) {
 		this.extensions = extensions;
 		this.runtime = runtime;
@@ -309,6 +324,8 @@ export class ExtensionRunner {
 		this.cwd = cwd;
 		this.sessionManager = sessionManager;
 		this.modelRegistry = modelRegistry;
+		this.extensionSqlite = extensionSqlite;
+		this.searchSessionsFn = searchSessions;
 	}
 
 	bindCore(
@@ -666,6 +683,41 @@ export class ExtensionRunner {
 		return this.runtime.getActiveTools();
 	}
 
+	/** Set the extension id recorded in sqlite audit logs for the current call. */
+	withExtensionId<T>(extensionId: string, fn: () => T): T {
+		const previous = this.currentExtensionId;
+		this.currentExtensionId = extensionId;
+		try {
+			return fn();
+		} finally {
+			this.currentExtensionId = previous;
+		}
+	}
+
+	getSqliteDb(): ExtensionSqliteDatabase {
+		if (!this.extensionSqlite) {
+			throw new Error("Extension sqlite is not available in this runtime");
+		}
+		return this.extensionSqlite.db;
+	}
+
+	getIndexDb(): ExtensionIndexDatabase {
+		if (!this.extensionSqlite) {
+			throw new Error("Extension sqlite is not available in this runtime");
+		}
+		return this.extensionSqlite.indexDbView;
+	}
+
+	searchSessions(
+		query: string,
+		options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+	): Promise<SessionSearchHit[]> {
+		if (!this.searchSessionsFn) {
+			return Promise.reject(new Error("Session search is not available in this runtime"));
+		}
+		return this.searchSessionsFn(query, options);
+	}
+
 	/**
 	 * Create an ExtensionContext for use in event handlers and tool execution.
 	 * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
@@ -694,6 +746,18 @@ export class ExtensionRunner {
 			get sessionManager() {
 				runner.assertActive();
 				return runner.sessionManager;
+			},
+			get sqlite() {
+				runner.assertActive();
+				return runner.getSqliteDb();
+			},
+			get indexDb() {
+				runner.assertActive();
+				return runner.getIndexDb();
+			},
+			searchSessions: (query, options) => {
+				runner.assertActive();
+				return runner.searchSessions(query, options);
 			},
 			get modelRegistry() {
 				runner.assertActive();
@@ -808,7 +872,7 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.withExtensionId(ext.path, () => handler(event, ctx));
 
 					if (this.isSessionBeforeEvent(event) && handlerResult) {
 						result = handlerResult as SessionBeforeEventResult;
@@ -938,7 +1002,7 @@ export class ExtensionRunner {
 			if (!handlers || handlers.length === 0) continue;
 
 			for (const handler of handlers) {
-				const handlerResult = await handler(event, ctx);
+				const handlerResult = await this.withExtensionId(ext.path, () => handler(event, ctx));
 
 				if (handlerResult) {
 					result = handlerResult as ToolCallEventResult;
@@ -961,7 +1025,7 @@ export class ExtensionRunner {
 
 			for (const handler of handlers) {
 				try {
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.withExtensionId(ext.path, () => handler(event, ctx));
 					if (handlerResult) {
 						return handlerResult as UserBashEventResult;
 					}
@@ -992,7 +1056,7 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const event: ContextEvent = { type: "context", messages: currentMessages };
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.withExtensionId(ext.path, () => handler(event, ctx));
 
 					if (handlerResult && (handlerResult as ContextEventResult).messages) {
 						currentMessages = (handlerResult as ContextEventResult).messages!;
@@ -1027,7 +1091,7 @@ export class ExtensionRunner {
 						type: "before_provider_request",
 						payload: currentPayload,
 					};
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.withExtensionId(ext.path, () => handler(event, ctx));
 					if (handlerResult !== undefined) {
 						currentPayload = handlerResult;
 					}
@@ -1061,7 +1125,7 @@ export class ExtensionRunner {
 						type: "before_provider_headers",
 						headers,
 					};
-					await handler(event, ctx);
+					await this.withExtensionId(ext.path, () => handler(event, ctx));
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					const stack = err instanceof Error ? err.stack : undefined;
@@ -1109,7 +1173,7 @@ export class ExtensionRunner {
 						systemPrompt: currentSystemPrompt,
 						systemPromptOptions,
 					};
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.withExtensionId(ext.path, () => handler(event, ctx));
 
 					if (handlerResult) {
 						const result = handlerResult as BeforeAgentStartEventResult;
@@ -1164,7 +1228,7 @@ export class ExtensionRunner {
 			for (const handler of handlers) {
 				try {
 					const event: ResourcesDiscoverEvent = { type: "resources_discover", cwd, reason };
-					const handlerResult = await handler(event, ctx);
+					const handlerResult = await this.withExtensionId(ext.path, () => handler(event, ctx));
 					const result = handlerResult as ResourcesDiscoverResult | undefined;
 
 					if (result?.skillPaths?.length) {
@@ -1213,7 +1277,9 @@ export class ExtensionRunner {
 						source,
 						streamingBehavior,
 					};
-					const result = (await handler(event, ctx)) as InputEventResult | undefined;
+					const result = (await this.withExtensionId(ext.path, () => handler(event, ctx))) as
+						| InputEventResult
+						| undefined;
 					if (result?.action === "handled") return result;
 					if (result?.action === "transform") {
 						currentText = result.text;

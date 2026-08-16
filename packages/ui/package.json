@@ -1,0 +1,50 @@
+{
+	"name": "@cogito/ui",
+	"version": "0.83.0",
+	"description": "UI hosting layer for pi modules (web today, mobile later)",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "node -e \"import('node:fs/promises').then(fs=>Promise.all([fs.rm('dist',{recursive:true,force:true}),fs.rm('node_modules/.vite',{recursive:true,force:true})]))\"",
+		"build": "tsgo -p tsconfig.build.json && vite build --config vite.config.ts && node scripts/build-sdk.mjs",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"keywords": [
+		"pi",
+		"ui",
+		"web",
+		"mobile",
+		"dashboard"
+	],
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/wuFiveNull/pi-cogito.git",
+		"directory": "packages/ui"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"devDependencies": {
+		"@types/react": "19.2.18",
+		"@types/react-dom": "19.2.4",
+		"@vitejs/plugin-react": "4.7.0",
+		"react": "19.2.5",
+		"react-dom": "19.2.5",
+		"vite": "6.0.7",
+		"marked": "18.0.9",
+		"highlight.js": "11.11.1"
+	}
+}

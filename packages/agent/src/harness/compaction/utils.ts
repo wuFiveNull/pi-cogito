@@ -1,4 +1,5 @@
-import { contentText, type Message } from "@earendil-works/pi-ai";
+import type { Message } from "@cogito/ai";
+import { contentText } from "@cogito/ai/utils/text";
 import type { AgentMessage } from "../../types.ts";
 
 /** File paths touched by a session branch or compaction range. */

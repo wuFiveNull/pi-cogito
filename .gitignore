@@ -14,6 +14,10 @@ packages/ai/src/providers/.model-generation-*/
 
 # Environment
 .env
+config.json
+
+# Runtime data
+.run/
 
 # Editor files
 .vscode/
@@ -23,6 +27,16 @@ packages/ai/src/providers/.model-generation-*/
 *.swp
 *.swo
 *~
+
+# tsc 误吐进 src 的构建产物(正常产物在 dist/)
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
+packages/storage/*/src/**/*.js
+packages/storage/*/src/**/*.js.map
+packages/storage/*/src/**/*.d.ts
+packages/storage/*/src/**/*.d.ts.map
 
 # Package specific
 .npm/

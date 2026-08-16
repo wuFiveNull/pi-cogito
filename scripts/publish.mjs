@@ -5,13 +5,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const packages = [
-	{ directory: "packages/ai", name: "@earendil-works/pi-ai" },
-	{ directory: "packages/agent", name: "@earendil-works/pi-agent-core" },
-	{ directory: "packages/protocol", name: "@earendil-works/pi-protocol" },
-	{ directory: "packages/client", name: "@earendil-works/pi-client" },
-	{ directory: "packages/storage/sqlite-node", name: "@earendil-works/pi-storage-sqlite-node" },
-	{ directory: "packages/tui", name: "@earendil-works/pi-tui" },
-	{ directory: "packages/coding-agent", name: "@earendil-works/pi-coding-agent" },
+	{ directory: "packages/ai", name: "@cogito/ai" },
+	{ directory: "packages/agent", name: "@cogito/agent-core" },
+	{ directory: "packages/storage/sqlite-node", name: "@cogito/storage-sqlite-node" },
+	{ directory: "packages/host", name: "@cogito/host" },
+	{ directory: "packages/mcp", name: "@cogito/mcp" },
+	{ directory: "packages/gateway", name: "@cogito/gateway" },
+	{ directory: "packages/gate", name: "@cogito/gate" },
+	{ directory: "packages/proactive", name: "@cogito/proactive" },
+	{ directory: "packages/drift", name: "@cogito/drift" },
+	{ directory: "packages/ui", name: "@cogito/ui" },
 ];
 
 const dryRun = process.argv.includes("--dry-run");

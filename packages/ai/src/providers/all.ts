@@ -138,6 +138,8 @@ export function builtinModels(options?: CreateModelsOptions): MutableModels {
 	return models;
 }
 
+export { builtinEmbeddingsModels, builtinEmbeddingsProviders } from "./embeddings/all.ts";
+
 /** All built-in image-generation providers, freshly constructed. */
 export function builtinImagesProviders(): ImagesProvider[] {
 	return [openrouterImagesProvider()];

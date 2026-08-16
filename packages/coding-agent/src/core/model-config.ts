@@ -1,6 +1,7 @@
 /** Immutable, credential-blind models.json snapshot. */
 
 import { readFile } from "node:fs/promises";
+import type { EmbeddingModel, EmbeddingsApi } from "@earendil-works/pi-ai";
 import { type Static, Type } from "typebox";
 import { Compile } from "typebox/compile";
 import type { TLocalizedValidationError } from "typebox/error";
@@ -188,6 +189,17 @@ const ModelOverrideSchema = Type.Object({
 	compat: Type.Optional(ProviderCompatSchema),
 });
 
+const EmbeddingModelDefinitionSchema = Type.Object({
+	id: Type.String({ minLength: 1 }),
+	name: Type.Optional(Type.String({ minLength: 1 })),
+	api: Type.Optional(Type.String({ minLength: 1 })),
+	baseUrl: Type.Optional(Type.String({ minLength: 1 })),
+	dimensions: Type.Number(),
+	maxInputTokens: Type.Optional(Type.Number()),
+	cost: Type.Optional(ModelCostSchema),
+	headers: Type.Optional(Type.Record(Type.String(), Type.String())),
+});
+
 const ProviderConfigSchema = Type.Object({
 	name: Type.Optional(Type.String({ minLength: 1 })),
 	baseUrl: Type.Optional(Type.String({ minLength: 1 })),
@@ -199,6 +211,7 @@ const ProviderConfigSchema = Type.Object({
 	authHeader: Type.Optional(Type.Boolean()),
 	models: Type.Optional(Type.Array(ModelDefinitionSchema)),
 	modelOverrides: Type.Optional(Type.Record(Type.String(), ModelOverrideSchema)),
+	embeddingModels: Type.Optional(Type.Array(EmbeddingModelDefinitionSchema)),
 });
 
 const ModelsConfigSchema = Type.Object({
@@ -208,6 +221,7 @@ const validateModelsConfig = Compile(ModelsConfigSchema);
 
 export type ModelsJsonModel = Static<typeof ModelDefinitionSchema>;
 export type ModelsJsonModelOverride = Static<typeof ModelOverrideSchema>;
+export type ModelsJsonEmbeddingModel = Static<typeof EmbeddingModelDefinitionSchema>;
 export type ModelsJsonProvider = Static<typeof ProviderConfigSchema>;
 type ModelsJson = Static<typeof ModelsConfigSchema>;
 
@@ -283,6 +297,36 @@ export class ModelConfig {
 
 	getProvider(providerId: string): ModelsJsonProvider | undefined {
 		return this.providers.get(providerId);
+	}
+
+	/** Embedding models configured for a provider in models.json (undefined when unset). */
+	getEmbeddingModels(providerId: string): readonly ModelsJsonEmbeddingModel[] | undefined {
+		return this.providers.get(providerId)?.embeddingModels;
+	}
+
+	/**
+	 * Map a models.json embedding model definition to an `EmbeddingModel`.
+	 * `api` defaults to `${providerId}-embeddings`; `baseUrl` falls back to the
+	 * provider-level baseUrl, then to `defaults.baseUrl` (the built-in
+	 * provider's default when composing with the ai package).
+	 */
+	toEmbeddingModel(
+		providerId: string,
+		definition: ModelsJsonEmbeddingModel,
+		defaults?: { baseUrl?: string },
+	): EmbeddingModel<EmbeddingsApi> {
+		const provider = this.providers.get(providerId);
+		return {
+			id: definition.id,
+			name: definition.name,
+			api: (definition.api ?? `${providerId}-embeddings`) as EmbeddingsApi,
+			provider: providerId,
+			baseUrl: definition.baseUrl ?? provider?.baseUrl ?? defaults?.baseUrl ?? "",
+			dimensions: definition.dimensions,
+			maxInputTokens: definition.maxInputTokens,
+			cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			headers: definition.headers,
+		};
 	}
 
 	getProviderIds(): readonly string[] {

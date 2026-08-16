@@ -1,0 +1,48 @@
+{
+	"name": "@cogito/proactive",
+	"version": "0.83.0",
+	"description": "proactive: proactive push engine (energy scheduling, agent tick judgment, evidence-first delivery)",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"scripts": {
+		"clean": "node -e \"import('node:fs/promises').then(fs=>fs.rm('dist',{recursive:true,force:true}))\"",
+		"build": "tsgo -p tsconfig.build.json",
+		"test": "vitest --run",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"keywords": [
+		"pi",
+		"proactive",
+		"push",
+		"notification"
+	],
+	"author": "Earendil Works",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/earendil-works/pi.git",
+		"directory": "packages/proactive"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"dependencies": {
+		"@cogito/agent-core": "0.83.0",
+		"@cogito/ai": "0.83.0",
+		"@cogito/gate": "0.83.0",
+		"@cogito/gateway": "0.83.0",
+		"@cogito/host": "0.83.0",
+		"@cogito/mcp": "0.83.0"
+	}
+}

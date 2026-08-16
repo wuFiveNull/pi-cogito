@@ -77,6 +77,14 @@ export type KnownImagesProvider = "openrouter";
 
 export type ImagesProviderId = KnownImagesProvider | string;
 
+export type KnownEmbeddingsApi = "siliconflow-embeddings";
+
+export type EmbeddingsApi = KnownEmbeddingsApi | (string & {});
+
+export type KnownEmbeddingsProvider = "siliconflow";
+
+export type EmbeddingsProviderId = KnownEmbeddingsProvider | string;
+
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type ModelThinkingLevel = "off" | ThinkingLevel;
 export type ThinkingLevelMap = Partial<Record<ModelThinkingLevel, string | null>>;
@@ -452,6 +460,88 @@ export interface AssistantImages {
 	stopReason: ImagesStopReason;
 	errorMessage?: string;
 	timestamp: number; // Unix timestamp in milliseconds
+}
+
+/** A text-embedding model backed by an embeddings API. */
+export interface EmbeddingModel<TApi extends EmbeddingsApi> {
+	id: string;
+	/** Optional display name. Defaults to `id`. */
+	name?: string;
+	api: TApi;
+	provider: EmbeddingsProviderId;
+	baseUrl: string;
+	/** Vector dimensionality of this model's output. */
+	dimensions: number;
+	/** Maximum tokens accepted per input item; longer inputs are truncated by the caller. */
+	maxInputTokens?: number;
+	cost: ModelCost;
+	headers?: Record<string, string>;
+}
+
+export interface EmbeddingsContext {
+	/** Inputs to embed. Providers may batch multiple items into one request. */
+	input: string[];
+}
+
+export type EmbeddingsStopReason = "stop" | "error" | "aborted";
+
+export interface EmbeddingResult {
+	api: EmbeddingsApi;
+	provider: EmbeddingsProviderId;
+	model: string;
+	/** One vector per input item, in the same order as `EmbeddingsContext.input`. */
+	embeddings: number[][];
+	usage?: Usage;
+	stopReason: EmbeddingsStopReason;
+	errorMessage?: string;
+	timestamp: number; // Unix timestamp in milliseconds
+}
+
+export interface EmbeddingsOptions {
+	signal?: AbortSignal;
+	apiKey?: string;
+	/** Optional fetch implementation for provider HTTP requests. Defaults to `globalThis.fetch`. */
+	fetch?: FetchFunction;
+	/**
+	 * Provider-scoped environment values. These take precedence over process.env for
+	 * provider configuration such as endpoint placeholders and proxy variables.
+	 */
+	env?: ProviderEnv;
+	/**
+	 * Optional callback for inspecting or replacing provider payloads before sending.
+	 * Return undefined to keep the payload unchanged.
+	 */
+	onPayload?: (
+		payload: unknown,
+		model: EmbeddingModel<EmbeddingsApi>,
+	) => unknown | undefined | Promise<unknown | undefined>;
+	/** Optional callback invoked after an HTTP response is received. */
+	onResponse?: (response: ProviderResponse, model: EmbeddingModel<EmbeddingsApi>) => void | Promise<void>;
+	/** Optional custom HTTP headers to include in API requests. */
+	headers?: ProviderHeaders;
+	/** HTTP request timeout in milliseconds for providers/SDKs that support it. */
+	timeoutMs?: number;
+	/** Maximum retry attempts for providers/SDKs that support client-side retries. */
+	maxRetries?: number;
+	/** Maximum delay in milliseconds to wait for a retry when the server requests a long wait. */
+	maxRetryDelayMs?: number;
+}
+
+export type EmbeddingsFunction<
+	TApi extends EmbeddingsApi = EmbeddingsApi,
+	TOptions extends EmbeddingsOptions = EmbeddingsOptions,
+> = (model: EmbeddingModel<TApi>, context: EmbeddingsContext, options?: TOptions) => Promise<EmbeddingResult>;
+
+/**
+ * The uniform contract of an embeddings API implementation module:
+ * every embeddings API module under `src/api/` exports exactly `embedTexts`.
+ */
+export interface ProviderEmbeddings {
+	embedTexts(
+		model: EmbeddingModel<EmbeddingsApi>,
+		context: EmbeddingsContext,
+		options?: EmbeddingsOptions,
+	): Promise<EmbeddingResult>;
 }
 
 import type { TSchema } from "typebox";

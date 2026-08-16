@@ -27,6 +27,10 @@ export default mergeConfig(
 					replacement: fileURLToPath(new URL("../client/src/index.ts", import.meta.url)),
 				},
 				{
+					find: /^@earendil-works\/pi-storage-sqlite-node$/,
+					replacement: fileURLToPath(new URL("../storage/sqlite-node/src/index.ts", import.meta.url)),
+				},
+				{
 					find: /^@earendil-works\/pi-protocol$/,
 					replacement: fileURLToPath(new URL("../protocol/src/index.ts", import.meta.url)),
 				},

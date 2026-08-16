@@ -5,24 +5,31 @@ export const workspaceSourcePaths = {
 	aiIndex: fileURLToPath(new URL("./packages/ai/src/index.ts", import.meta.url)),
 	aiCompat: fileURLToPath(new URL("./packages/ai/src/compat.ts", import.meta.url)),
 	aiOAuth: fileURLToPath(new URL("./packages/ai/src/oauth.ts", import.meta.url)),
+	aiApi: fileURLToPath(new URL("./packages/ai/src/api", import.meta.url)),
 	aiProviders: fileURLToPath(new URL("./packages/ai/src/providers", import.meta.url)),
+	aiUtils: fileURLToPath(new URL("./packages/ai/src/utils", import.meta.url)),
 	agentIndex: fileURLToPath(new URL("./packages/agent/src/index.ts", import.meta.url)),
-	codingAgentIndex: fileURLToPath(new URL("./packages/coding-agent/src/index.ts", import.meta.url)),
-	tuiIndex: fileURLToPath(new URL("./packages/tui/src/index.ts", import.meta.url)),
 } as const;
 
 export default defineConfig({
 	resolve: {
 		alias: [
-			{ find: /^@earendil-works\/pi-ai$/, replacement: workspaceSourcePaths.aiIndex },
-			{ find: /^@earendil-works\/pi-ai\/compat$/, replacement: workspaceSourcePaths.aiCompat },
-			{ find: /^@earendil-works\/pi-ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
+			{ find: /^@cogito\/ai$/, replacement: workspaceSourcePaths.aiIndex },
+			{ find: /^@cogito\/ai\/compat$/, replacement: workspaceSourcePaths.aiCompat },
+			{ find: /^@cogito\/ai\/oauth$/, replacement: workspaceSourcePaths.aiOAuth },
 			{
-				find: /^@earendil-works\/pi-ai\/providers\/(.+)$/,
+				find: /^@cogito\/ai\/api\/(.+)$/,
+				replacement: `${workspaceSourcePaths.aiApi}/$1.ts`,
+			},
+			{
+				find: /^@cogito\/ai\/providers\/(.+)$/,
 				replacement: `${workspaceSourcePaths.aiProviders}/$1.ts`,
 			},
-			{ find: /^@earendil-works\/pi-agent-core$/, replacement: workspaceSourcePaths.agentIndex },
-			{ find: /^@earendil-works\/pi-tui$/, replacement: workspaceSourcePaths.tuiIndex },
+			{
+				find: /^@cogito\/ai\/utils\/(.+)$/,
+				replacement: `${workspaceSourcePaths.aiUtils}/$1.ts`,
+			},
+			{ find: /^@cogito\/agent-core$/, replacement: workspaceSourcePaths.agentIndex },
 		],
 	},
 });

@@ -82,6 +82,7 @@ import type {
 	ReadToolInput,
 	WriteToolInput,
 } from "../tools/index.ts";
+import type { ExtensionIndexDatabase, ExtensionSqliteDatabase } from "./sqlite.ts";
 
 export type { ExecOptions, ExecResult } from "../exec.ts";
 export type { BuildSystemPromptOptions } from "../system-prompt.ts";
@@ -304,6 +305,17 @@ export interface CompactOptions {
  */
 export type ExtensionMode = "tui" | "rpc" | "json" | "print";
 
+/** One hit from ctx.searchSessions(). */
+export interface SessionSearchHit {
+	sessionId: string;
+	entryId: string;
+	type: string;
+	timestamp: string;
+	text: string;
+	/** bm25 score (keyword) or cosine distance (vector); lower is better. */
+	score?: number;
+}
+
 export interface ExtensionContext {
 	/** UI methods for user interaction */
 	ui: ExtensionUIContext;
@@ -315,6 +327,25 @@ export interface ExtensionContext {
 	cwd: string;
 	/** Session manager (read-only) */
 	sessionManager: ReadonlySessionManager;
+	/**
+	 * Shared extensions database (agentDir/extensions.sqlite): read/write.
+	 * All extensions share one connection, so statements serialize. Every
+	 * write is audit-logged to `_oplog` (queryable, but not modifiable).
+	 */
+	sqlite: ExtensionSqliteDatabase;
+	/**
+	 * Read-only view of the session index database. Write methods are not
+	 * exposed; queries run on a WAL snapshot and never block index writes.
+	 */
+	indexDb: ExtensionIndexDatabase;
+	/**
+	 * Search session entries (keyword bm25 or semantic vector). Returns raw
+	 * scores; combine with your own ranking data via sqlite tables.
+	 */
+	searchSessions(
+		query: string,
+		options?: { mode?: "keyword" | "vector"; cwd?: string; limit?: number },
+	): Promise<SessionSearchHit[]>;
 	/** Model registry for API key resolution */
 	modelRegistry: ModelRegistry;
 	/** Current model (may be undefined) */

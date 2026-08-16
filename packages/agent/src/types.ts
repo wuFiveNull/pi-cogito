@@ -12,7 +12,7 @@ import type {
 	Tool,
 	ToolResultMessage,
 	Usage,
-} from "@earendil-works/pi-ai";
+} from "@cogito/ai";
 import type { Static, TSchema } from "typebox";
 
 /**
@@ -140,6 +140,49 @@ export interface AgentLoopTurnUpdate {
 }
 
 export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {}
+
+/** Named extension point within one agent turn. */
+export type AgentLifecyclePhase = "before_turn" | "before_reasoning" | "after_reasoning" | "after_turn";
+
+/** Stops the current turn before the provider request begins. */
+export interface AgentLifecycleAbort {
+	reason: string;
+}
+
+/** Mutable state supplied to lifecycle phase modules. */
+export interface AgentLifecycleContext {
+	phase: AgentLifecyclePhase;
+	agentContext: AgentContext;
+	newMessages: AgentMessage[];
+	turnIndex: number;
+	signal?: AbortSignal;
+	assistantMessage?: AssistantMessage;
+	toolResults?: ToolResultMessage[];
+	abort?: AgentLifecycleAbort;
+	hints: string[];
+	metadata: Record<string, unknown>;
+}
+
+/** Per-phase slot store supplied to one lifecycle module invocation. */
+export interface AgentLifecycleFrame {
+	readonly context: AgentLifecycleContext;
+	get<T = unknown>(slot: string): T | undefined;
+	set(slot: string, value: unknown): void;
+}
+
+/** A composable module that participates in one named lifecycle phase. */
+export interface AgentLifecycleModule {
+	phase: AgentLifecyclePhase;
+	slot: string;
+	requires?: readonly string[];
+	produces?: readonly string[];
+	run(frame: AgentLifecycleFrame): void | Promise<void>;
+}
+
+/** Runtime used by the agent loop to execute phase modules. */
+export interface AgentLifecycleRunner {
+	run(context: AgentLifecycleContext): Promise<AgentLifecycleContext>;
+}
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
@@ -284,12 +327,15 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * The hook receives the agent abort signal and is responsible for honoring it.
 	 */
 	afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
+
+	/** Optional ordered phase runner for before/after turn extensions. */
+	lifecycle?: AgentLifecycleRunner;
 }
 
 /**
  * Thinking/reasoning level for models that support it.
  * Note: "xhigh" and "max" are only supported by selected model families. Use model
- * thinking-level metadata from @earendil-works/pi-ai to detect support for a concrete model.
+ * thinking-level metadata from @cogito/ai to detect support for a concrete model.
  */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -412,6 +458,16 @@ export interface AgentContext {
 	tools?: AgentTool<any>[];
 }
 
+/** Context emitted immediately before each provider turn begins. */
+export interface BeforeTurnContext {
+	/** Current transcript and tools that will be used for the next provider call. */
+	context: AgentContext;
+	/** Messages produced by this loop invocation so far. */
+	newMessages: AgentMessage[];
+	/** Zero-based turn number within this loop invocation. */
+	turnIndex: number;
+}
+
 /**
  * Events emitted by the Agent for UI updates.
  *
@@ -424,6 +480,7 @@ export type AgentEvent =
 	| { type: "agent_start" }
 	| { type: "agent_end"; messages: AgentMessage[] }
 	// Turn lifecycle - a turn is one assistant response + any tool calls/results
+	| ({ type: "before_turn" } & BeforeTurnContext)
 	| { type: "turn_start" }
 	| { type: "turn_end"; message: AgentMessage; toolResults: ToolResultMessage[] }
 	// Message lifecycle - emitted for user, assistant, and toolResult messages

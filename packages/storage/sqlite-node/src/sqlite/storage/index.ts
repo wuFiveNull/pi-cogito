@@ -1,10 +1,5 @@
-import type {
-	SessionBranchQuery,
-	SessionEntryCursorOptions,
-	SessionStats,
-	SessionTreeEntry,
-} from "@earendil-works/pi-agent-core";
-import { SessionError, toError } from "@earendil-works/pi-agent-core";
+import type { SessionBranchQuery, SessionEntryCursorOptions, SessionStats, SessionTreeEntry } from "@cogito/agent-core";
+import { SessionError, toError } from "@cogito/agent-core";
 import type { SqliteDatabase, SqliteSessionMetadata } from "../types.ts";
 import {
 	appendEntryToBranchCache,

@@ -1,0 +1,1 @@
+{"trace_type":"proactive_config","source":"proactive.config","subject":{"kind":"global","id":"config"},"ts":"2026-08-15T10:34:33.639Z","payload":{"enabled":true,"tick_interval_s0":4800,"tick_interval_s1":2400,"tick_jitter":0.3}}

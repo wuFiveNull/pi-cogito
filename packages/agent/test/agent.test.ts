@@ -1,4 +1,4 @@
-import { type AssistantMessage, type AssistantMessageEvent, EventStream, getModel } from "@earendil-works/pi-ai/compat";
+import { type AssistantMessage, type AssistantMessageEvent, EventStream, getModel } from "@cogito/ai/compat";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import {
@@ -171,6 +171,7 @@ describe("Agent", () => {
 
 		expect(events).toEqual([
 			"agent_start",
+			"before_turn",
 			"turn_start",
 			"message_start",
 			"message_end",

@@ -1,7 +1,10 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Text } from "@earendil-works/pi-tui";
 import { spawn } from "child_process";
+import ignore from "ignore";
+import { minimatch } from "minimatch";
 import path from "path";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
@@ -52,8 +55,117 @@ const defaultFindOperations: FindOperations = {
 };
 
 export interface FindToolOptions {
-	/** Custom operations for find. Default: local filesystem plus fd */
+	/** Custom operations for find. Default: local filesystem plus fd (or a native fallback when fd is unavailable) */
 	operations?: FindOperations;
+}
+
+const FIND_IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"] as const;
+type FindIgnoreMatcher = ReturnType<typeof ignore>;
+
+interface FindIgnoreRule {
+	baseDir: string;
+	matcher: FindIgnoreMatcher;
+}
+
+interface NativeFindResult {
+	paths: string[];
+	resultLimitReached: boolean;
+}
+
+function readFindIgnoreRules(dir: string): FindIgnoreRule[] {
+	const rules: FindIgnoreRule[] = [];
+	for (const filename of FIND_IGNORE_FILE_NAMES) {
+		try {
+			const matcher = ignore();
+			matcher.add(readFileSync(path.join(dir, filename), "utf8").split(/\r?\n/));
+			rules.push({ baseDir: dir, matcher });
+		} catch {
+			// Ignore missing or unreadable ignore files, matching fd's best-effort traversal.
+		}
+	}
+	return rules;
+}
+
+function isIgnoredFindPath(candidate: string, isDirectory: boolean, rules: FindIgnoreRule[]): boolean {
+	for (const rule of rules) {
+		const relativeCandidate = path.relative(rule.baseDir, candidate);
+		if (
+			!relativeCandidate ||
+			relativeCandidate === ".." ||
+			relativeCandidate.startsWith(`..${path.sep}`) ||
+			path.isAbsolute(relativeCandidate)
+		) {
+			continue;
+		}
+		const ignorePath = toPosixPath(isDirectory ? `${relativeCandidate}${path.sep}` : relativeCandidate);
+		if (rule.matcher.ignores(ignorePath)) return true;
+	}
+	return false;
+}
+
+function validateFindPattern(pattern: string): void {
+	let escaped = false;
+	let characterClassOpen = false;
+	for (const character of pattern) {
+		if (escaped) {
+			escaped = false;
+			continue;
+		}
+		if (character === "\\") {
+			escaped = true;
+		} else if (character === "[") {
+			characterClassOpen = true;
+		} else if (character === "]") {
+			characterClassOpen = false;
+		}
+	}
+	if (characterClassOpen) {
+		throw new Error(`error parsing glob: unclosed character class in ${JSON.stringify(pattern)}`);
+	}
+}
+
+function collectNativeFindResults(
+	searchPath: string,
+	pattern: string,
+	limit: number,
+	signal?: AbortSignal,
+): NativeFindResult {
+	validateFindPattern(pattern);
+	const paths: string[] = [];
+	const matchBase = !pattern.includes("/");
+
+	const walk = (directory: string, inheritedRules: FindIgnoreRule[]): boolean => {
+		if (signal?.aborted) throw new Error("Operation aborted");
+		const rules = [...inheritedRules, ...readFindIgnoreRules(directory)];
+		const entries = (() => {
+			try {
+				return readdirSync(directory, { withFileTypes: true });
+			} catch {
+				return [];
+			}
+		})();
+		entries.sort((left, right) => left.name.localeCompare(right.name));
+
+		for (const entry of entries) {
+			if (signal?.aborted) throw new Error("Operation aborted");
+			const fullPath = path.join(directory, entry.name);
+			const isDirectory = entry.isDirectory();
+			if (isDirectory && entry.name === ".git") continue;
+			if (isIgnoredFindPath(fullPath, isDirectory, rules)) continue;
+
+			const relativePath = toPosixPath(path.relative(searchPath, fullPath));
+			if (minimatch(relativePath, pattern, { dot: true, matchBase })) {
+				paths.push(relativePath);
+				if (paths.length >= limit) return true;
+			}
+
+			if (isDirectory && walk(fullPath, rules)) return true;
+		}
+		return false;
+	};
+
+	walk(searchPath, []);
+	return { paths, resultLimitReached: paths.length >= limit };
 }
 
 function formatFindCall(args: { pattern: string; path?: string; limit?: number } | undefined, theme: Theme): string {
@@ -210,17 +322,56 @@ export function createFindToolDefinition(
 							return;
 						}
 
-						// Default implementation uses fd.
+						// Default implementation prefers fd, with a native fallback for offline environments.
 						const fdPath = await ensureTool("fd", true);
 						if (signal?.aborted) {
 							settle(() => reject(new Error("Operation aborted")));
 							return;
 						}
 						if (!fdPath) {
-							settle(() => reject(new Error("fd is not available and could not be downloaded")));
+							if (!(await pathExists(searchPath))) {
+								settle(() => reject(new Error(`Path not found: ${searchPath}`)));
+								return;
+							}
+
+							const nativeResult = collectNativeFindResults(searchPath, pattern, effectiveLimit, signal);
+							if (nativeResult.paths.length === 0) {
+								settle(() =>
+									resolve({
+										content: [{ type: "text", text: "No files found matching pattern" }],
+										details: undefined,
+									}),
+								);
+								return;
+							}
+
+							const rawOutput = nativeResult.paths.join("\n");
+							const truncation = truncateHead(rawOutput, { maxLines: Number.MAX_SAFE_INTEGER });
+							let resultOutput = truncation.content;
+							const details: FindToolDetails = {};
+							const notices: string[] = [];
+							if (nativeResult.resultLimitReached) {
+								notices.push(
+									`${effectiveLimit} results limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
+								);
+								details.resultLimitReached = effectiveLimit;
+							}
+							if (truncation.truncated) {
+								notices.push(`${formatSize(DEFAULT_MAX_BYTES)} limit reached`);
+								details.truncation = truncation;
+							}
+							if (notices.length > 0) resultOutput += `\n\n[${notices.join(". ")}]`;
+							settle(() =>
+								resolve({
+									content: [{ type: "text", text: resultOutput }],
+									details: Object.keys(details).length > 0 ? details : undefined,
+								}),
+							);
 							return;
 						}
 
+						const commandPath = fdPath;
+						const commandName = "fd";
 						const args: string[] = ["--glob", "--color=never", "--hidden"];
 
 						// fd normally ignores .gitignore outside git repos, so keep --no-require-git
@@ -252,7 +403,8 @@ export function createFindToolDefinition(
 						}
 						args.push("--", effectivePattern, searchPath);
 
-						const child = spawn(fdPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+						const command = commandPath;
+						const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
 						const rl = createInterface({ input: child.stdout });
 						let stderr = "";
 						const lines: string[] = [];
@@ -277,7 +429,7 @@ export function createFindToolDefinition(
 
 						child.on("error", (error) => {
 							cleanup();
-							settle(() => reject(new Error(`Failed to run fd: ${error.message}`)));
+							settle(() => reject(new Error(`Failed to run ${commandName}: ${error.message}`)));
 						});
 
 						child.on("close", (code) => {
@@ -288,7 +440,7 @@ export function createFindToolDefinition(
 							}
 							const output = lines.join("\n");
 							if (code !== 0) {
-								const errorMsg = stderr.trim() || `fd exited with code ${code}`;
+								const errorMsg = stderr.trim() || `${commandName} exited with code ${code}`;
 								if (!output) {
 									settle(() => reject(new Error(errorMsg)));
 									return;

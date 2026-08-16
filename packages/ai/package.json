@@ -1,5 +1,5 @@
 {
-	"name": "@earendil-works/pi-ai",
+	"name": "@cogito/ai",
 	"version": "0.83.0",
 	"description": "Unified LLM API with automatic model discovery and provider configuration",
 	"type": "module",
@@ -23,9 +23,21 @@
 			"types": "./dist/providers/*.d.ts",
 			"import": "./dist/providers/*.js"
 		},
+		"./chat": {
+			"types": "./dist/chat.d.ts",
+			"import": "./dist/chat.js"
+		},
+		"./providers/embeddings/*": {
+			"types": "./dist/providers/embeddings/*.d.ts",
+			"import": "./dist/providers/embeddings/*.js"
+		},
 		"./api/*": {
 			"types": "./dist/api/*.d.ts",
 			"import": "./dist/api/*.js"
+		},
+		"./utils/*": {
+			"types": "./dist/utils/*.d.ts",
+			"import": "./dist/utils/*.js"
 		},
 		"./oauth": {
 			"types": "./dist/oauth.d.ts",

@@ -1,18 +1,18 @@
-import {
-	type AssistantMessage,
-	type Context,
-	contentText,
-	type ImageContent,
-	type Model,
-	type Models,
-	type RetryCallbacks,
-	type RetryPolicy,
-	retryAssistantCall,
-	type SimpleStreamOptions,
-	type TextContent,
-	type Usage,
-	uuidv7,
-} from "@earendil-works/pi-ai";
+import type {
+	AssistantMessage,
+	Context,
+	ImageContent,
+	Model,
+	Models,
+	RetryCallbacks,
+	RetryPolicy,
+	SimpleStreamOptions,
+	TextContent,
+	Usage,
+} from "@cogito/ai";
+import { retryAssistantCall } from "@cogito/ai/utils/retry";
+import { contentText } from "@cogito/ai/utils/text";
+import { uuidv7 } from "@cogito/ai/utils/uuid";
 import type { AgentMessage, ThinkingLevel } from "../../types.ts";
 import {
 	convertToLlm,

@@ -1,6 +1,6 @@
-# @earendil-works/pi-storage-sqlite-node
+# @cogito/storage-sqlite-node
 
-Node sqlite storage backend for `@earendil-works/pi-agent-core` sessions. Provides the
+Node sqlite storage backend for `@cogito/agent-core` sessions. Provides the
 `node:sqlite` adapter (`SqliteDatabase` implementation), SQLite session repository,
 migrations, materialized views, and optional FTS search.
 
