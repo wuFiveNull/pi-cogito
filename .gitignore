@@ -22,7 +22,7 @@ __pycache__/
 *.pyc
 *.sqlite
 *.db
-packages/proactive/proactive_*_trace.jsonl
+packages/proactive/proactive_*.jsonl
 
 # Editor files
 .vscode/
