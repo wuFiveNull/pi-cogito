@@ -11,7 +11,7 @@
  */
 
 import { join, resolve } from "node:path";
-import type { ThinkingLevel } from "@cogito/agent-core";
+import type { StreamFn, ThinkingLevel } from "@cogito/agent-core";
 import type { Model } from "@cogito/ai";
 import {
 	ChannelAgentRuntime,
@@ -24,7 +24,15 @@ import {
 	loadGatewayConfig,
 	writeGatewayReadiness,
 } from "@cogito/gateway";
-import { ExtensionSqlite, getAgentDir, ModelRuntime, SettingsManager, type ToolDefinition } from "@cogito/host";
+import {
+	createSubagentAgentRunner,
+	ExtensionSqlite,
+	getAgentDir,
+	ModelRuntime,
+	SettingsManager,
+	type SubagentRunner,
+	type ToolDefinition,
+} from "@cogito/host";
 import { CHAT_SCHEDULE_TOOLS, type ChatConfig, loadChatConfig } from "./config.ts";
 import { mountWebDashboard, resolveProactiveDbPath } from "./dashboard.ts";
 import { ChatDelivery } from "./delivery.ts";
@@ -171,6 +179,17 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 		});
 		const model = resolveChatModel(chatConfig, modelRuntime);
 		const settingsManager = SettingsManager.create(projectDir, agentDir);
+		// Sub-agent delegation: one shared runner (model/credentials follow the
+		// main sessions), one per-session SubagentManager mounted as an
+		// inline extension by createChatResourceLoader.
+		const subagentRunner: SubagentRunner | undefined = model
+			? createSubagentAgentRunner({
+					model,
+					thinkingLevel: chatConfig.thinkingLevel as ThinkingLevel | undefined,
+					cwd: projectDir,
+					streamFn: buildSubagentStreamFn(modelRuntime, settingsManager),
+				})
+			: undefined;
 		const toolAllow = chatConfig.tools?.allowed;
 		const allowedToolNames = toolAllow ? toolAllow.filter((name) => !toolExcluded(name, chatConfig)) : undefined;
 		const excludedToolNames = toolAllow ? undefined : chatConfig.tools?.excluded;
@@ -196,6 +215,7 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 					settingsManager,
 					scope,
 					memory: memory ?? undefined,
+					injectMemoryProfile: chatConfig.memory?.injectProfile !== false,
 					chatTools: buildChatTools(
 						{
 							delivery,
@@ -211,6 +231,7 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 					),
 					extensionsDir: chatConfig.extensionsDir,
 					persona: chatConfig.persona,
+					subagentRunner,
 				}),
 			maxSessions: chatConfig.sessions?.maxSessions,
 			maxIdleMinutes: chatConfig.sessions?.maxIdleMinutes,
@@ -328,6 +349,30 @@ function buildChatTools(deps: ChatToolBuildDeps, scope: ChatSessionScope): ToolD
 		tools.push(...createScheduleTools(deps.scheduler, scope));
 	}
 	return tools;
+}
+
+/**
+ * Stream function for sub-agent calls, mirroring the main session wiring in
+ * host's createAgentSession (provider retry settings, HTTP idle timeout).
+ * Extension header hooks are intentionally omitted: sub-agents have no
+ * extension runtime of their own.
+ */
+function buildSubagentStreamFn(modelRuntime: ModelRuntime, settingsManager: SettingsManager): StreamFn {
+	return (model, context, options) => {
+		const providerRetrySettings = settingsManager.getProviderRetrySettings();
+		const httpIdleTimeoutMs = settingsManager.getHttpIdleTimeoutMs();
+		// SDKs treat timeout=0 as 0ms (immediate timeout), not "no timeout".
+		// Use max int32 to effectively disable the timeout.
+		const effectiveTimeoutMs = httpIdleTimeoutMs === 0 ? 2147483647 : httpIdleTimeoutMs;
+		const timeoutMs = options?.timeoutMs ?? providerRetrySettings.timeoutMs ?? effectiveTimeoutMs;
+		return modelRuntime.streamSimple(model, context, {
+			...options,
+			timeoutMs,
+			websocketConnectTimeoutMs: settingsManager.getWebSocketConnectTimeoutMs(),
+			maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
+			maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
+		});
+	};
 }
 
 function resolveChatModel(chatConfig: ChatConfig, modelRuntime: ModelRuntime): Model<any> | undefined {
