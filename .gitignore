@@ -18,6 +18,11 @@ config.json
 
 # Runtime data
 .run/
+__pycache__/
+*.pyc
+*.sqlite
+*.db
+packages/proactive/proactive_*_trace.jsonl
 
 # Editor files
 .vscode/

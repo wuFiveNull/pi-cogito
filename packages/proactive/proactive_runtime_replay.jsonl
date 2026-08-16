@@ -1,7 +1,0 @@
-{"type":"snapshot_installed","snapshotId":"snapshot-1-1786790073638","fenceToken":1,"leaseCount":0,"sequence":1,"at":1786790073638}
-{"type":"lease_acquired","snapshotId":"snapshot-1-1786790073638","fenceToken":1,"leaseCount":1,"sequence":2,"at":1786790073639}
-{"type":"lease_released","snapshotId":"snapshot-1-1786790073638","fenceToken":1,"leaseCount":0,"sequence":3,"at":1786790092934}
-{"type":"lease_acquired","snapshotId":"snapshot-1-1786790073638","fenceToken":1,"leaseCount":1,"sequence":4,"at":1786791905073}
-{"type":"lease_released","snapshotId":"snapshot-1-1786790073638","fenceToken":1,"leaseCount":0,"sequence":5,"at":1786791905090}
-{"type":"snapshot_paused","snapshotId":"snapshot-1-1786790073638","fenceToken":1,"leaseCount":0,"sequence":6,"at":1786792275759}
-{"type":"snapshot_drained","snapshotId":"snapshot-1-1786790073638","fenceToken":1,"leaseCount":0,"sequence":7,"at":1786792275761}

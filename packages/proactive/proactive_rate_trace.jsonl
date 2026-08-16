@@ -1,2 +1,0 @@
-{"trace_type":"proactive_rate","source":"proactive.rate","subject":{"kind":"global","id":"rate"},"ts":"2026-08-15T10:34:52.934Z","payload":{"mode":"fixed_no_presence","base_score":0.4,"interval_seconds":1800,"tick_interval_s0":4800,"tick_interval_s1":2400,"tick_jitter":0.3}}
-{"trace_type":"proactive_rate","source":"proactive.rate","subject":{"kind":"global","id":"rate"},"ts":"2026-08-15T11:05:05.090Z","payload":{"mode":"fixed_no_presence","base_score":0.4,"interval_seconds":1800,"tick_interval_s0":4800,"tick_interval_s1":2400,"tick_jitter":0.3}}
