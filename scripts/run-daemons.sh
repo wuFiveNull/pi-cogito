@@ -10,7 +10,9 @@
 #
 # 环境:
 #   COGITO_CODING_AGENT_DIR 指向可写的 agent 目录(沙箱中 ~/.cogito 只读时用副本)。
-#   proactive.json 默认读 .run/proactive.json;driftDir 默认 .run/agent/drift。
+#   proactive.json 默认读 .run/proactive.json;drift 工作区固定为仓库内
+#   .cogito/extensions/drift,与 proactive 的 drift 门控/投递恢复共用同一份
+#   drift.db(proactive.json 的 drift.driftDir 勿改)。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,7 +20,7 @@ RUN_DIR="$ROOT/.run"
 LOG_DIR="$RUN_DIR/logs"
 AGENT_DIR="${COGITO_CODING_AGENT_DIR:-$HOME/.cogito/agent}"
 PROACTIVE_CONFIG="${PROACTIVE_CONFIG:-$RUN_DIR/proactive.json}"
-DRIFT_DIR="${DRIFT_DIR:-$AGENT_DIR/drift}"
+DRIFT_DIR="${DRIFT_DIR:-$ROOT/.cogito/extensions/drift}"
 
 mkdir -p "$LOG_DIR"
 
@@ -109,7 +111,7 @@ case "${1:-status}" in
 		;;
 	gateway|proactive|drift)
 		# 单进程:scripts/run-daemons.sh proactive start
-		local action="${2:-status}"
+		action="${2:-status}"
 		case "$action" in
 			start) start_one "$1" ;;
 			stop) stop_one "$1" ;;
