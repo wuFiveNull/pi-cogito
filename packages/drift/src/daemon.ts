@@ -19,7 +19,7 @@ import { DriftStateStore } from "./state.ts";
 
 /** Options for {@link runDriftDaemon}. */
 export interface DriftDaemonOptions {
-	/** Drift 工作区/状态目录(默认 ~/.cogito/agent/drift)。 */
+	/** Drift 工作区/状态目录(默认 <cwd>/.cogito/extensions/drift)。 */
 	driftDir?: string;
 	/** 目标会话 key(默认 local)。 */
 	sessionKey?: string;
@@ -154,7 +154,8 @@ function seededRandom(seed: string): number {
 export async function runDriftDaemon(options: DriftDaemonOptions = {}): Promise<void> {
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
-	const driftDir = options.driftDir ?? join(agentDir, "drift");
+	// 挂载目录统一在项目 .cogito/extensions 下(与 proactive 扩展同层)。
+	const driftDir = options.driftDir ?? join(cwd, ".cogito", "extensions", "drift");
 	const sessionKey = options.sessionKey ?? "local";
 	const tickIntervalSeconds = options.tickIntervalSeconds ?? 300;
 	const nowFn = options.nowFn ?? (() => new Date());

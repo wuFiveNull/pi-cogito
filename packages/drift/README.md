@@ -11,7 +11,7 @@ drift tools and the proactive judge.
 
 ## 技能
 
-- 技能放在 `driftDir/skills/<skill-name>/SKILL.md`(默认 `~/.cogito/agent/drift/skills`)。
+- 技能放在 `driftDir/skills/<skill-name>/SKILL.md`(默认 `<project>/.cogito/extensions/drift/skills`)。
 - **内置元技能 `create-drift-skill`**:daemon 启动时自动种入(幂等,已存在则跳过),
   让 agent 能在空闲时创建/更新其他 drift skill。
 - **示例案例技能**:`packages/drift/examples/skills/`(`audit-dirty-memories` 记忆审计 /

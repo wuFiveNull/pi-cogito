@@ -4,6 +4,10 @@
 
 ### Added
 
+- Context frame now degrades by section instead of blind truncation: `fitContextFrame` drops low-priority sections (`FRAME_DROP_ORDER`, exported) until the budget fits and appends a `[context frame dropped sections: ...]` notice so the model knows what is missing; hard clipping remains as a last resort.
+
+### Added
+
 - 文件上下文提供器：按每轮 Drift 重新加载 `memory/VEDA.md`、`SELF.md`、`MEMORY.md` 与 `RECENT_CONTEXT.md`；支持严格 UTF-8 校验和 `requiredVeda`。
 - 投递闭环：`runs.message_hash` 列 + `markRunMessageSent()`，投递确认后 `message_result` 从 staged 回写 sent（akashic `record_commit_result` 对应物，按 hash 幂等匹配）。
 - 上下文帧补全：`runtime_clock` 增加 `current_time_local`（akashic `_build_runtime_clock`）；新增可选 `activityFn` 依赖，注入 `user_activity` 段（如 last_user_at）。
@@ -39,3 +43,6 @@
 - Drift 的 OpenAI-compatible LLM 调用改为复用 `@cogito/ai/chat`，保留宿主注入 fetch/client 的兼容入口。
 - `DriftLlmFn`/`LlmToolCall` 返回值携带 LLM cache usage;loop 汇总为 run 级统计,随 `drift_finished` 事件以 `llmCacheReadTokens`/`llmCacheWriteTokens` 输出(akashic `record_llm_cache` 审计)。
 - wrap-up 收尾提示保持 user role 并注释原因:`@cogito/ai` 的 `Message` 联合类型无 system 角色,akashic 的 system-role 注入无法等价移植(行为等价)。
+
+
+- Default `driftDir` moved from `~/.cogito/agent/drift` to `<cwd>/.cogito/extensions/drift` (skills at `<driftDir>/skills`); the daemon now mounts drift under the project `.cogito/extensions` tree alongside proactive.

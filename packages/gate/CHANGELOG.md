@@ -4,6 +4,10 @@
 
 ### Added
 
+- Added `normalizeOutboundText` (lowercase + whitespace/punctuation stripping) for fuzzy push-message dedupe, and the drift observability schema contract (`DRIFT_*_OBSERVATION_COLUMNS`) so cross-package read-only queries stay compile-time aligned with `drift.db`.
+
+### Added
+
 - 三进程共享状态层:proactive 与 drift 解耦,门控/调度/投递恢复/事件契约收编到本包,双方互不依赖。
 - `DriftGateStore`:`drift_gate` 许可读写(TTL 过期返回 null),proactive 写、drift daemon 读。
 - `DriftStagedDeliveryStore`:跨进程 staged 投递恢复(drift 写 staged,proactive 恢复投递),含投递类型契约(`DriftDeliverySink`/`DriftDeliveryRecord`/`DriftDeliveryReceipt`/`DriftDeliveryStatus`)。

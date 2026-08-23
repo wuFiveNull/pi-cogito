@@ -29,10 +29,10 @@ proactive ──► pi-gate ◄── drift
 import { DriftGateStore } from "@cogito/gate";
 
 // proactive 侧:写许可
-const gate = new DriftGateStore({ driftDir: "~/.cogito/agent/drift" });
+const gate = new DriftGateStore({ driftDir: ".cogito/extensions/drift" });
 gate.writeDriftGate({ sessionKey: "local", verdict: "allowed", reason: "wake_idle", grantedAt: new Date(), ttlHours: 1 });
 
 // drift 侧:读许可(TTL 过期返回 null)
-const gate2 = new DriftGateStore({ driftDir: "~/.cogito/agent/drift" });
+const gate2 = new DriftGateStore({ driftDir: ".cogito/extensions/drift" });
 const verdict = gate2.readDriftGate("local", new Date());
 ```

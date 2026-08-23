@@ -21,6 +21,17 @@ export function hashMessage(text: string): string {
 	return createHash("sha256").update(text.trim()).digest("hex");
 }
 
+/**
+ * 推送文本归一化:小写 + 去除空白与常见中英文标点。
+ * 用于消息去重的"语义相近但文本略不同"(换行/标点差异)比较,不替代 hash。
+ */
+export function normalizeOutboundText(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/[\s\u3000]+/g, "")
+		.replace(/[，。！？、；：""''（）《》……—·～～,.!?;:'"()[\]{}<>-]/g, "");
+}
+
 export function hashOutboundMessage(
 	text: string,
 	media: readonly string[],

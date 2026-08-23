@@ -735,10 +735,12 @@ export class DriftTurnPipeline {
 		if (currentContext) {
 			sections.push({ name: "current_context_events", content: currentContext });
 		}
-		const rendered = await this.host?.renderContextFrame?.(sections, ctx);
-		const content =
-			rendered?.trim() || sections.map((section) => `## ${section.name}\n${section.content}`).join("\n\n");
-		return { role: "system", content: clipContextText(content, this.maxContextChars) };
+		const renderSections = async (list: readonly DriftContextSection[]): Promise<string> => {
+			const hostRendered = await this.host?.renderContextFrame?.(list, ctx);
+			return hostRendered?.trim() || list.map((section) => `## ${section.name}\n${section.content}`).join("\n\n");
+		};
+		const fitted = await fitContextFrame(sections, renderSections, this.maxContextChars);
+		return { role: "system", content: fitted.content };
 	}
 
 	private async readMemoryText(ctx: DriftRunContext): Promise<string> {
@@ -899,6 +901,52 @@ export class DriftTurnPipeline {
 function formatTime(date: Date): string {
 	const pad = (n: number) => String(n).padStart(2, "0");
 	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/**
+ * 上下文帧 section 丢弃优先级(低优先级先丢):增强段优先于核心段
+ * (drift_skills / drift_briefing / long_term_memory 等永不主动丢弃)。
+ */
+export const FRAME_DROP_ORDER: readonly string[] = [
+	"current_context_events",
+	"recent_raw_chat",
+	"user_activity",
+	"drift_mcp_directory",
+	"recent_context",
+	"drift_note",
+	"recent_drift_runs",
+	"drift_self_observations",
+	"drift_selection_context",
+];
+
+/**
+ * 上下文帧拟合:总长超预算时按 FRAME_DROP_ORDER 从低优先级开始剔除 section,
+ * 并在帧尾追加被丢弃名单(让模型知道哪部分缺失)。核心段永不主动丢弃;
+ * 剔除后仍超限由 clipContextText 兜底截断。
+ */
+export async function fitContextFrame(
+	sections: readonly DriftContextSection[],
+	render: (list: readonly DriftContextSection[]) => string | Promise<string>,
+	maxChars: number,
+): Promise<{ content: string; dropped: readonly string[] }> {
+	let remaining = sections;
+	let content = (await render(remaining)).trim();
+	const dropped: string[] = [];
+	if (content.length > maxChars) {
+		for (const name of FRAME_DROP_ORDER) {
+			if (content.length <= maxChars) break;
+			if (!remaining.some((section) => section.name === name)) continue;
+			dropped.push(name);
+			remaining = remaining.filter((section) => section.name !== name);
+			content = (await render(remaining)).trim();
+		}
+	}
+	if (dropped.length > 0) {
+		content = `${content}
+
+[context frame dropped sections: ${dropped.join(", ")}]`;
+	}
+	return { content: clipContextText(content, maxChars), dropped };
 }
 
 function clipContextText(text: string, limit: number): string {

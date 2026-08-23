@@ -25,7 +25,7 @@ export interface WebApiOptions {
 	memoryDbPath?: string;
 	/** drift/drift.db 路径(投递确认时回写 drift run 的 message_result)。 */
 	driftDbPath?: string;
-	/** drift skills 目录(~/.cogito/agent/drift/skills) */
+	/** drift skills 目录(<project>/.cogito/extensions/drift/skills) */
 	driftSkillsDir?: string;
 	/** mcp.json 路径 */
 	mcpConfigPath?: string;

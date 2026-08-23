@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { formatPreferenceBlock, recallPreferences } from "../src/memory.ts";
-import { hashMessage, hashOutboundMessage } from "../src/outbound.ts";
+import { hashMessage, hashOutboundMessage, normalizeOutboundText } from "../src/outbound.ts";
 
 const tempDirs: string[] = [];
 
@@ -60,5 +60,19 @@ describe("hashOutboundMessage(共享投递哈希)", () => {
 		const withMedia = hashOutboundMessage("hello", ["data:image/png;base64,x"], [], "", "");
 		expect(withMedia).not.toBe(plain);
 		expect(withMedia).toHaveLength(64);
+	});
+});
+
+describe("normalizeOutboundText", () => {
+	it("lowercases and strips whitespace and punctuation", () => {
+		expect(normalizeOutboundText("  你好，世界！\n第二行 ")).toBe("你好世界第二行");
+		expect(normalizeOutboundText("Hello, World!")).toBe("helloworld");
+		expect(normalizeOutboundText("推送：测试（一）——完成")).toBe("推送测试一完成");
+		expect(normalizeOutboundText("")).toBe("");
+	});
+
+	it("treats punctuation-only differences as equal", () => {
+		expect(normalizeOutboundText("明天记得备份。")).toBe(normalizeOutboundText("明天记得备份！"));
+		expect(normalizeOutboundText("a-b c")).toBe(normalizeOutboundText("abc"));
 	});
 });

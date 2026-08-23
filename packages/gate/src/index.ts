@@ -17,8 +17,14 @@ export { DriftGateStore, WAKE_DRIFT_GATE_TTL_HOURS } from "./gate.ts";
 export type { RecallEmbeddingFn, RecalledPreference } from "./memory.ts";
 export { formatPreferenceBlock, recallPreferences, recallPreferencesRanked } from "./memory.ts";
 export { pickDaemonModel } from "./model-pick.ts";
+export {
+	DRIFT_ACTIVE_RUNS_OBSERVATION_COLUMNS,
+	DRIFT_RUN_DETAIL_OBSERVATION_COLUMNS,
+	DRIFT_RUN_STEPS_OBSERVATION_COLUMNS,
+	DRIFT_RUNS_OBSERVATION_COLUMNS,
+} from "./observability.ts";
 export type { DriftAttachmentKind, DriftOutboundAttachment } from "./outbound.ts";
-export { hashMessage, hashOutboundMessage } from "./outbound.ts";
+export { hashMessage, hashOutboundMessage, normalizeOutboundText } from "./outbound.ts";
 export type {
 	DriftDeliveryReceipt,
 	DriftDeliveryRecord,

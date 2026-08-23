@@ -30,6 +30,10 @@ export type {
 } from "@cogito/gate";
 export {
 	advanceDriftDrive,
+	DRIFT_ACTIVE_RUNS_OBSERVATION_COLUMNS,
+	DRIFT_RUN_DETAIL_OBSERVATION_COLUMNS,
+	DRIFT_RUN_STEPS_OBSERVATION_COLUMNS,
+	DRIFT_RUNS_OBSERVATION_COLUMNS,
 	formatPreferenceBlock,
 	hashOutboundMessage,
 	pickDaemonModel,
