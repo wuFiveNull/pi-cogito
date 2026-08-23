@@ -13,6 +13,7 @@ import type {
 	MemoryHit,
 	MemoryScope,
 	MemoryType,
+	PostResponseLlm,
 	RetrieveOptions,
 	RetrieverOptions,
 	TextEmbedder,
@@ -97,8 +98,22 @@ export class Retriever {
 		this.hotnessHalfLifeDays = Math.max(1, options.hotnessHalfLifeDays ?? 14);
 	}
 
-	/** Fused vector + keyword retrieval. */
+	/** Fused vector + keyword retrieval (intent-routed, akashic engine.query). */
 	async retrieve(query: string, options: RetrieveOptions = {}): Promise<MemoryHit[]> {
+		const intent = options.intent ?? "context";
+		let memoryTypes = options.memoryTypes;
+		if (intent === "interest" && !memoryTypes) memoryTypes = ["preference", "profile"];
+		if (intent === "procedure" && !memoryTypes) memoryTypes = ["procedure"];
+		const auxQueries = options.auxQueries ? [...options.auxQueries] : [];
+		if (intent === "answer" && options.hypothesisLlm) {
+			const [hyp1, hyp2] = await Promise.all([
+				generateHypothesis(options.hypothesisLlm, query, "event"),
+				generateHypothesis(options.hypothesisLlm, query, "general"),
+			]);
+			for (const hypothesis of [hyp1, hyp2]) {
+				if (hypothesis) auxQueries.push(hypothesis);
+			}
+		}
 		const actualTopK = Math.max(1, options.topK ?? this.topK);
 		const actualThreshold = options.scoreThreshold ?? this.scoreThreshold;
 		const scope = options.scope;
@@ -106,7 +121,7 @@ export class Retriever {
 		const searchOptions = {
 			topK: actualTopK,
 			scoreThreshold: actualThreshold,
-			memoryTypes: options.memoryTypes,
+			memoryTypes,
 			scope,
 			requireScopeMatch,
 			hotnessAlpha: this.hotnessAlpha,
@@ -115,7 +130,7 @@ export class Retriever {
 			timeEnd: options.timeEnd,
 		};
 
-		const queryTexts = dedupeTexts([query, ...(options.auxQueries ?? [])]);
+		const queryTexts = dedupeTexts([query, ...auxQueries]);
 		const vectorItems = await this.retrieveVectorLanes(queryTexts, searchOptions);
 
 		let keywordItems: MemoryHit[] = [];
@@ -294,6 +309,42 @@ export function extractTerms(query: string): string[] {
 		result.push(term);
 	}
 	return result.slice(0, 20);
+}
+
+const HYPOTHESIS_SYSTEM = "你是个人助手的记忆系统。根据用户提问生成一条假想记忆条目，只输出那一条文本。";
+
+/** HyDE 假设生成 prompt(akashic _explicit_hypothesis_prompt)。 */
+export function buildHypothesisPrompt(query: string, style: "event" | "general"): string {
+	if (style === "event") {
+		return `根据用户提问，生成一条带具体时间的假想记忆条目，格式如 '[2026-03-08] 用户...'
+规则：第三人称、简洁事实陈述、只输出那一条文本
+
+用户提问：${query}
+假想记忆条目：`;
+	}
+	return `根据用户提问，生成一条假想记忆条目。
+规则：始终生成肯定式、第三人称（'用户…'）、简洁事实陈述、只输出那一条文本
+
+用户提问：${query}
+假想记忆条目：`;
+}
+
+/**
+ * HyDE 假设生成:用轻模型把问题改写为假想记忆条目,并入检索辅助查询。
+ * 失败(网络/空输出)返回 undefined,调用方降级为原查询(akashic _gen_hypothesis)。
+ */
+export async function generateHypothesis(
+	llm: PostResponseLlm,
+	query: string,
+	style: "event" | "general",
+): Promise<string | undefined> {
+	try {
+		const text = await llm.chat(HYPOTHESIS_SYSTEM, buildHypothesisPrompt(query, style), 96);
+		const trimmed = text.trim();
+		return trimmed.length > 0 ? trimmed.slice(0, 200) : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /**

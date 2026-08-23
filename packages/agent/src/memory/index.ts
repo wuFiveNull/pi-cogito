@@ -15,6 +15,7 @@ export * from "./llm.ts";
 export * from "./loop.ts";
 export * from "./markdown-store.ts";
 export * from "./optimizer.ts";
+export * from "./recent-context.ts";
 
 export interface MemoryOptimizerTaskOptions {
 	workspaceDir: string;

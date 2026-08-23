@@ -29,6 +29,8 @@ export interface ConsolidationLoopOptions {
 	config?: ConsolidationConfig;
 	/** 向量层桥接回调:consolidation 写 markdown 后、推进游标前调用。 */
 	onConsolidated?: (payload: ConsolidatedPayload) => Promise<void> | void;
+	/** 每轮 consolidation 后刷新 RECENT_CONTEXT.md(周期路径默认开启)。 */
+	writeRecentContext?: boolean;
 	nowFn?: () => Date;
 }
 
@@ -40,6 +42,7 @@ export class ConsolidationLoop {
 	private readonly interval: number;
 	private readonly config: ConsolidationConfig;
 	private readonly onConsolidated: ((payload: ConsolidatedPayload) => Promise<void> | void) | undefined;
+	private readonly writeRecentContext: boolean;
 	private readonly nowFn: () => Date;
 	private running = false;
 	private wakeSleep: (() => void) | undefined;
@@ -53,6 +56,7 @@ export class ConsolidationLoop {
 		this.interval = Math.max(60, options.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS);
 		this.config = options.config ?? {};
 		this.onConsolidated = options.onConsolidated;
+		this.writeRecentContext = options.writeRecentContext ?? true;
 		this.nowFn = options.nowFn ?? (() => new Date());
 	}
 
@@ -94,6 +98,7 @@ export class ConsolidationLoop {
 					cursorStore: this.cursorStore,
 					config: this.config,
 					onConsolidated: this.onConsolidated,
+					writeRecentContext: this.writeRecentContext,
 				});
 				if (result.consolidated > 0) touched++;
 			} catch {

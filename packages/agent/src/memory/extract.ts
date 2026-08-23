@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { atomicWriteText, type MarkdownMemoryStore } from "./markdown-store.ts";
 import type { MemoryLlm } from "./optimizer.ts";
+import { refreshRecentContext } from "./recent-context.ts";
 
 const ALLOWED_PENDING_TAGS = new Set([
 	"identity",
@@ -450,6 +451,11 @@ export interface ConsolidateMessagesOptions {
 	onConsolidated?: (payload: ConsolidatedPayload) => Promise<void> | void;
 	/** 显式作用域解析;缺省按会话文件名启发式推断(parseSessionScope)。 */
 	resolveScope?: (sessionFile: string) => { channel: string; chatId: string } | undefined;
+	/**
+	 * 刷新 RECENT_CONTEXT.md(akashic recent_context 压缩)。只应在低频周期路径
+	 * (ConsolidationLoop)开启;before_turn 每轮路径保持关闭,避免逐轮多一次 LLM 调用。
+	 */
+	writeRecentContext?: boolean;
 }
 
 /** 读取一个会话 jsonl 文件为消息列表。 */
@@ -527,6 +533,18 @@ export async function consolidateMessages(options: ConsolidateMessagesOptions): 
 	if (extracted.pendingItems) {
 		store.appendPendingOnce(extracted.pendingItems, { sourceRef, kind: "pending_items" });
 	}
+	// 近期语境压缩:失败内部吞掉,不阻断主流程。
+	if (options.writeRecentContext) {
+		const selected = limited.selected;
+		await refreshRecentContext({
+			store,
+			llm,
+			messages,
+			conversation,
+			compressionUntil: selected.length > 0 ? String(selected[selected.length - 1]?.timestamp ?? "") : "",
+			keepCount,
+		});
+	}
 	// 向量层同步在游标推进前完成:失败则游标不推进,下轮按 source_ref 幂等重试。
 	if (options.onConsolidated) {
 		const scope = options.resolveScope?.(sessionKey) ?? parseSessionScope(sessionKey) ?? { channel: "", chatId: "" };
@@ -556,6 +574,7 @@ export async function consolidateSession(options: {
 	config?: ConsolidationConfig;
 	onConsolidated?: ConsolidateMessagesOptions["onConsolidated"];
 	resolveScope?: ConsolidateMessagesOptions["resolveScope"];
+	writeRecentContext?: boolean;
 }): Promise<ConsolidateSessionResult> {
 	return consolidateMessages({
 		store: options.store,
@@ -566,6 +585,7 @@ export async function consolidateSession(options: {
 		config: options.config,
 		onConsolidated: options.onConsolidated,
 		resolveScope: options.resolveScope,
+		writeRecentContext: options.writeRecentContext,
 	});
 }
 

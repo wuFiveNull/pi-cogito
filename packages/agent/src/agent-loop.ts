@@ -6,6 +6,14 @@
 import type { AssistantMessage, Context, ToolResultMessage } from "@cogito/ai";
 import { EventStream } from "@cogito/ai/utils/event-stream";
 import { validateToolArguments } from "@cogito/ai/utils/validation";
+import {
+	buildCompactionSummaryMessage,
+	buildCompactionUserPrompt,
+	buildQueryCompactionMarker,
+	QUERY_COMPACTION_SYSTEM,
+	QueryCompactor,
+	replayQueryCompactions,
+} from "./query-compaction.ts";
 import { getDefaultStreamFn } from "./stream-fn.ts";
 import type {
 	AgentContext,
@@ -121,6 +129,14 @@ export async function runAgentLoop(
 		return newMessages;
 	}
 
+	// 跨轮查询内压缩重放:把上一轮持久化的压缩 marker 落回上下文(坐标校验失败
+	// 时原样保留,不丢消息)。放在 before_turn 之后,记忆 consolidation 仍能看到
+	// 完整历史,LLM 上下文(transformContext)看到的是重放后的流。
+	const replayed = replayQueryCompactions(currentContext.messages);
+	if (replayed !== currentContext.messages) {
+		currentContext.messages = replayed;
+	}
+
 	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
 	return newMessages;
 }
@@ -157,6 +173,12 @@ export async function runAgentLoopContinue(
 		return newMessages;
 	}
 
+	// 跨轮查询内压缩重放(runAgentLoop 同款)。
+	const replayed = replayQueryCompactions(currentContext.messages);
+	if (replayed !== currentContext.messages) {
+		currentContext.messages = replayed;
+	}
+
 	await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
 	return newMessages;
 }
@@ -184,6 +206,26 @@ async function runLoop(
 	let firstTurn = true;
 	let currentTurnIndex = 0;
 	let nextTurnIndex = 1;
+	// 查询内压缩器(akashic QueryCompactor):仅在配置启用时惰性创建。
+	let queryCompactor: QueryCompactor | undefined;
+	const getQueryCompactor = (): QueryCompactor | undefined => {
+		if (queryCompactor || !config.queryCompaction || config.queryCompaction.enabled === false) {
+			return queryCompactor;
+		}
+		const options = config.queryCompaction;
+		const contextWindow = options.contextWindow ?? config.model.contextWindow ?? 0;
+		if (contextWindow <= 0) return undefined;
+		queryCompactor = new QueryCompactor({
+			contextWindow,
+			triggerPercent: options.triggerPercent,
+			keepRecentBatches: options.keepRecentBatches,
+			summarize:
+				options.summarize ??
+				((segment, summarizeSignal) => defaultQuerySummarize(config, segment, summarizeSignal, streamFunction)),
+			estimate: options.estimate,
+		});
+		return queryCompactor;
+	};
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -279,6 +321,31 @@ async function runLoop(
 				for (const result of toolResults) {
 					currentContext.messages.push(result);
 					newMessages.push(result);
+				}
+
+				// 查询内压缩:工具批次落地后,若上下文估算超阈值则压缩较早历史。
+				const compactor = getQueryCompactor();
+				if (compactor) {
+					try {
+						const plan = await compactor.maybeCompact(currentContext.messages, signal);
+						if (plan) {
+							currentContext.messages.splice(
+								plan.startIndex,
+								plan.endIndex - plan.startIndex,
+								buildCompactionSummaryMessage(plan.summary),
+							);
+							compactor.recordCompacted(plan);
+							// 持久化压缩 marker(akashic react_compaction 等价):
+							// host 经 message_end 落 session,下一轮 runAgentLoop 重放,
+							// 使压缩跨轮生效而不只在本轮内存中。
+							const marker = buildQueryCompactionMarker(plan);
+							newMessages.push(marker);
+							await emit({ type: "message_start", message: marker });
+							await emit({ type: "message_end", message: marker });
+						}
+					} catch {
+						// 压缩失败不阻断工具循环。
+					}
 				}
 			}
 
@@ -910,4 +977,33 @@ function createToolResultMessage(finalized: FinalizedToolCallOutcome): ToolResul
 async function emitToolResultMessage(toolResultMessage: ToolResultMessage, emit: AgentEventSink): Promise<void> {
 	await emit({ type: "message_start", message: toolResultMessage });
 	await emit({ type: "message_end", message: toolResultMessage });
+}
+
+/**
+ * 默认查询内摘要生成:用主模型跑一次无工具补全(akashic compaction summary)。
+ * 失败返回空字符串,调用方跳过本次压缩。
+ */
+async function defaultQuerySummarize(
+	config: AgentLoopConfig,
+	segment: AgentMessage[],
+	signal: AbortSignal | undefined,
+	streamFunction: StreamFn,
+): Promise<string> {
+	const context: Context = {
+		systemPrompt: QUERY_COMPACTION_SYSTEM,
+		messages: [{ role: "user", content: buildCompactionUserPrompt(segment), timestamp: Date.now() }],
+		tools: [],
+	};
+	const response = await streamFunction(config.model, context, {
+		...config,
+		maxTokens: 1000,
+		...(signal ? { signal } : {}),
+	});
+	const message = await response.result();
+	const parts = Array.isArray(message.content) ? message.content : [];
+	const text = parts
+		.map((part) => (typeof part === "object" && part !== null && part.type === "text" ? (part.text ?? "") : ""))
+		.join("")
+		.trim();
+	return text;
 }

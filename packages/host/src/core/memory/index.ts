@@ -1,9 +1,11 @@
 /**
- * Memory engine factory (akashic memory2 design).
+ * Memory engine factory registry (akashic core/memory/engine.py + plugin.py 移植)。
  *
- * Wires the dedicated SQLite store, the fusion retriever and the
- * supersede-aware memorizer around the shared embeddings wiring
- * (models.json + auth.json + sqlite-vec).
+ * The default factory wires the dedicated SQLite store, the fusion retriever
+ * and the supersede-aware memorizer around the shared embeddings wiring
+ * (models.json + auth.json + sqlite-vec). Additional engines can be registered
+ * under a name and selected via `MemoryEngineOptions.engine`, mirroring
+ * akashic's pluggable `[memory].engine`; unknown names fall back to "default".
  */
 
 import { join } from "node:path";
@@ -23,6 +25,8 @@ export interface MemoryEngineOptions {
 	embedder?: TextEmbedder;
 	/** Vector dimensionality. Defaults to 1024. */
 	vecDim?: number;
+	/** Engine name from the registry (akashic `[memory].engine`). Defaults to "default". */
+	engine?: string;
 }
 
 export interface MemoryEngine {
@@ -34,7 +38,27 @@ export interface MemoryEngine {
 	close(): void;
 }
 
-export async function createMemoryEngine(options: MemoryEngineOptions): Promise<MemoryEngine> {
+/** 引擎工厂:按 options 构造一个 MemoryEngine(akashic MemoryPlugin.build)。 */
+export type MemoryEngineFactory = (options: MemoryEngineOptions) => Promise<MemoryEngine>;
+
+const DEFAULT_ENGINE_NAME = "default";
+
+const engineFactories = new Map<string, MemoryEngineFactory>();
+
+/** 注册命名记忆引擎工厂(替换/扩展默认实现,akashic `[memory].engine` 语义)。 */
+export function registerMemoryEngineFactory(name: string, factory: MemoryEngineFactory): void {
+	if (!name || name === DEFAULT_ENGINE_NAME) {
+		throw new Error(`memory engine name must be non-empty and not "${DEFAULT_ENGINE_NAME}"`);
+	}
+	engineFactories.set(name, factory);
+}
+
+/** 已注册的引擎名(不含内置 default)。 */
+export function listMemoryEngineFactories(): readonly string[] {
+	return [...engineFactories.keys()];
+}
+
+async function createDefaultMemoryEngine(options: MemoryEngineOptions): Promise<MemoryEngine> {
 	const dbPath = options.dbPath ?? join(options.agentDir, "memory", "memory.sqlite");
 
 	let embedder: TextEmbedder | undefined = options.embedder;
@@ -68,6 +92,12 @@ export async function createMemoryEngine(options: MemoryEngineOptions): Promise<
 	};
 }
 
+export async function createMemoryEngine(options: MemoryEngineOptions): Promise<MemoryEngine> {
+	const name = options.engine ?? DEFAULT_ENGINE_NAME;
+	const factory = engineFactories.get(name) ?? createDefaultMemoryEngine;
+	return factory(options);
+}
+
 export type {
 	ConsolidationBridgeEngine,
 	ConsolidationBridgeOptions,
@@ -82,12 +112,25 @@ export {
 	parseToolRequirement,
 	resolveProcedureRuleSchema,
 } from "./memorizer.ts";
-export { extractTerms, rrfMerge } from "./retriever.ts";
+export type {
+	PostResponseRunOptions,
+	PostResponseRunResult,
+	PostResponseWorkerOptions,
+	ToolChainCall,
+} from "./post-response-worker.ts";
+export {
+	collectProtectedMemoryIds,
+	PostResponseMemoryWorker,
+	parseStringArray,
+} from "./post-response-worker.ts";
+export { extractTerms, generateHypothesis, rrfMerge } from "./retriever.ts";
 export { contentHash, cosineSimilarity, hotnessScore, normalizeVector } from "./store.ts";
 export type {
 	MemoryHit,
+	MemoryQueryIntent,
 	MemoryScope,
 	MemoryType,
+	PostResponseLlm,
 	RetrieveOptions,
 	RetrieverOptions,
 	SaveItemOptions,

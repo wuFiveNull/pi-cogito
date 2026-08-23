@@ -191,8 +191,9 @@ describe("MemoryStore retrieval", () => {
 
 		const hits = store.keywordSearchSummary(["docker", "compose"], { topK: 10 });
 		expect(hits[0]?.summary).toContain("docker compose");
-		expect(hits[0]?.keywordScore).toBe(1);
-		expect(hits[1]?.keywordScore).toBe(0.5);
+		// summary 命中 1 分 + extra_json(trigger_tags)命中 0.5 分,按 term 数归一。
+		expect(hits[0]?.keywordScore).toBe(1.5);
+		expect(hits[1]?.keywordScore).toBe(0.75);
 	});
 
 	it("semantic dedup reinforces recent similar events", async () => {

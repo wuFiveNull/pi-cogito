@@ -13,6 +13,7 @@ import { coerceEmotionalWeight, type MemoryStore } from "./store.ts";
 import type {
 	BehaviorUpdate,
 	MemoryScope,
+	MemoryType,
 	SaveItemOptions,
 	SaveItemWithSupersedeOptions,
 	TextEmbedder,
@@ -22,6 +23,8 @@ export interface ProcedureRuleSchema {
 	requiredTools: string[];
 	forbiddenTools: string[];
 	mentionedTools: string[];
+	/** 触发关键词(akashic trigger_tags):用户消息命中时走纯关键词拦截路径。 */
+	triggerTags: string[];
 }
 
 const NEGATIVE_TOOL_PREFIXES = [
@@ -76,9 +79,11 @@ export class Memorizer {
 	/** embed -> content-hash upsert. Returns "new:<id>" or "reinforced:<id>". */
 	async saveItem(options: SaveItemOptions): Promise<string> {
 		validateProcedureMetadata(options.summary, options.memoryType, options.extra);
+		const extra = maybeAttachTriggerTags(options);
 		const embedding = await this.embed(options.summary);
 		return this.store.upsertItem({
 			...options,
+			extra,
 			embedding,
 		});
 	}
@@ -91,6 +96,7 @@ export class Memorizer {
 	 */
 	async saveItemWithSupersede(options: SaveItemWithSupersedeOptions): Promise<string> {
 		validateProcedureMetadata(options.summary, options.memoryType, options.extra);
+		const extra = maybeAttachTriggerTags(options);
 		const mergeThreshold = options.mergeThreshold ?? 0.7;
 		const supersedeThreshold = options.supersedeThreshold ?? 0.9;
 		const embedding = await this.embed(options.summary);
@@ -114,7 +120,21 @@ export class Memorizer {
 			}
 			const supersedeIds = similar.filter((item) => item.score >= supersedeThreshold).map((item) => item.id);
 			if (supersedeIds.length > 0) {
-				this.store.markSupersededBatch(supersedeIds, options.sourceRef);
+				// 先写入新条目拿到 id,再 supersede 并记录替换审计(undo 需要 new_item_id 反查)。
+				const prefixedId = this.store.upsertItem({ ...options, extra, embedding });
+				if (prefixedId.startsWith("reinforced:")) {
+					// 同内容已存在(就是候选本身),不需要替换。
+					return prefixedId;
+				}
+				const newItemId = prefixedId.slice(prefixedId.indexOf(":") + 1);
+				this.store.markSupersededBatch(supersedeIds, options.sourceRef, {
+					id: newItemId,
+					memoryType: options.memoryType,
+					summary: options.summary,
+					sourceRef: options.sourceRef,
+					happenedAt: options.happenedAt,
+				});
+				return `new:${newItemId}`;
 			}
 		} else if (options.memoryType === "profile") {
 			const category = String(options.extra?.category ?? "");
@@ -143,6 +163,7 @@ export class Memorizer {
 
 		return this.store.upsertItem({
 			...options,
+			extra,
 			embedding,
 		});
 	}
@@ -231,9 +252,10 @@ export class Memorizer {
 			}
 		}
 		if (memoryType === "procedure") {
-			newExtra.rule_schema = resolveProcedureRuleSchema(mergedSummary, newExtra);
-			// Trigger tags were derived from an older summary; drop for consistency.
-			delete newExtra.trigger_tags;
+			const schema = resolveProcedureRuleSchema(mergedSummary, newExtra);
+			newExtra.rule_schema = schema;
+			// Trigger tags were derived from an older summary; re-derive from the merged text.
+			newExtra.trigger_tags = schema.triggerTags;
 		}
 
 		const newEmbedding = await this.embed(mergedSummary);
@@ -273,6 +295,19 @@ function validateProcedureMetadata(summary: string, memoryType: string, extra?: 
 	}
 }
 
+/** procedure 写入时补 trigger_tags(显式已提供则不覆盖;akashic procedure_tagger 的规则版)。 */
+function maybeAttachTriggerTags(options: {
+	memoryType: MemoryType;
+	summary: string;
+	extra?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+	if (options.memoryType !== "procedure") return options.extra;
+	const base = options.extra ?? {};
+	if (Array.isArray(base.trigger_tags) && (base.trigger_tags as unknown[]).length > 0) return options.extra;
+	const triggerTags = resolveProcedureRuleSchema(options.summary, base).triggerTags;
+	return { ...base, trigger_tags: triggerTags };
+}
+
 // ------------------------------------------------------------------
 // Procedure rule schema (compact port of akashic rule_schema.py)
 // ------------------------------------------------------------------
@@ -307,6 +342,7 @@ export function resolveProcedureRuleSchema(summary: string, extra: Record<string
 			requiredTools: explicit.requiredTools,
 			forbiddenTools: explicit.forbiddenTools,
 			mentionedTools: explicit.mentionedTools,
+			triggerTags: parseTriggerTags(explicit.triggerTags, summary),
 		};
 	}
 
@@ -315,6 +351,7 @@ export function resolveProcedureRuleSchema(summary: string, extra: Record<string
 		requiredTools: [...inferred.required],
 		forbiddenTools: [...inferred.forbidden],
 		mentionedTools: [...inferred.mentioned],
+		triggerTags: inferTriggerTags(summary),
 	};
 }
 
@@ -324,14 +361,107 @@ function parseRuleSchema(value: unknown): ProcedureRuleSchema | null {
 	const requiredTools = parseSchemaList(record.required_tools);
 	const forbiddenTools = parseSchemaList(record.forbidden_tools);
 	const mentionedTools = parseSchemaList(record.mentioned_tools);
-	if (requiredTools.length === 0 && forbiddenTools.length === 0 && mentionedTools.length === 0) return null;
-	return { requiredTools, forbiddenTools, mentionedTools };
+	const triggerTags = parseSchemaList(record.trigger_tags);
+	if (
+		requiredTools.length === 0 &&
+		forbiddenTools.length === 0 &&
+		mentionedTools.length === 0 &&
+		triggerTags.length === 0
+	) {
+		return null;
+	}
+	return { requiredTools, forbiddenTools, mentionedTools, triggerTags };
 }
 
 function parseSchemaList(value: unknown): string[] {
 	if (!Array.isArray(value)) return [];
 	return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
+
+/**
+ * 触发关键词推断(akashic procedure_tagger 的规则版):从 summary 提取
+ * ASCII token 与 CJK 双字词,过滤停止词,最多 8 个,写入 extra.trigger_tags,
+ * 供 keyword 检索的 extra_json 命中路径做纯关键词拦截。
+ */
+export function inferTriggerTags(summary: string): string[] {
+	const tags = new Set<string>();
+	for (const match of summary.matchAll(/[A-Za-z][A-Za-z0-9_]{1,}/g)) {
+		const token = match[0].toLowerCase();
+		if (token.length >= 2 && token.length <= 24 && !TRIGGER_STOPWORDS.has(token)) tags.add(token);
+	}
+	for (const chunk of summary.matchAll(/[\u4e00-\u9fff]{2,}/g)) {
+		const text = chunk[0] ?? "";
+		if (text.length <= 4) {
+			if (!TRIGGER_STOPWORDS.has(text)) tags.add(text);
+			continue;
+		}
+		// 长中文段取高频双字词。
+		for (let i = 0; i < text.length - 1; i++) {
+			const bigram = text.slice(i, i + 2);
+			if (!TRIGGER_STOPWORDS.has(bigram)) tags.add(bigram);
+		}
+	}
+	return [...tags].slice(0, 8);
+}
+
+/** 显式 trigger_tags 与推断结果合并(显式优先,去重,最多 8 个)。 */
+export function parseTriggerTags(explicit: readonly string[] | undefined, summary: string): string[] {
+	const merged = new Set<string>();
+	for (const tag of explicit ?? []) {
+		const trimmed = tag.trim();
+		if (trimmed) merged.add(trimmed);
+	}
+	for (const tag of inferTriggerTags(summary)) merged.add(tag);
+	return [...merged].slice(0, 8);
+}
+
+const TRIGGER_STOPWORDS = new Set([
+	"一个",
+	"什么",
+	"我们",
+	"你们",
+	"他们",
+	"这个",
+	"那个",
+	"自己",
+	"因为",
+	"所以",
+	"但是",
+	"可以",
+	"需要",
+	"没有",
+	"不是",
+	"就是",
+	"还是",
+	"或者",
+	"然后",
+	"怎么",
+	"怎样",
+	"哪个",
+	"哪些",
+	"是否",
+	"如何",
+	"以及",
+	"还有",
+	"现在",
+	"今天",
+	"使用",
+	"通过",
+	"进行",
+	"用户",
+	"流程",
+	"步骤",
+	"应该",
+	"the",
+	"and",
+	"for",
+	"with",
+	"from",
+	"that",
+	"this",
+	"have",
+	"user",
+]);
 
 function inferRuleConstraints(
 	summary: string,

@@ -108,6 +108,50 @@ export function coerceEmotionalWeight(value: unknown): number {
 	return Math.max(0, Math.min(10, Math.trunc(value)));
 }
 
+/**
+ * 解析 source_ref 中的消息 id 列表(akashic _source_ref_message_ids):
+ * source_ref 若是 JSON 字符串数组(consolidation 的 id 列表)则解析;
+ * 否则视为单个 id 的字符串形式,返回 [source]。
+ */
+export function sourceRefMessageIds(sourceRef: string): string[] {
+	const trimmed = sourceRef.trim();
+	if (!trimmed) return [];
+	if (trimmed.startsWith("[")) {
+		try {
+			const parsed = JSON.parse(trimmed) as unknown;
+			if (Array.isArray(parsed)) {
+				return parsed.map((id) => (typeof id === "string" ? id.trim() : "")).filter((id) => id.length > 0);
+			}
+		} catch {
+			// 非 JSON 数组,按单 id 处理。
+		}
+	}
+	return [trimmed];
+}
+
+/** memory_replacements 审计记录(supersede/merge/forget 的旧值快照)。 */
+export interface ReplacementRecord {
+	oldItemId: string;
+	oldMemoryType: string;
+	oldSummary: string;
+	newItemId: string;
+	newMemoryType: string;
+	newSummary: string;
+	relationType: string;
+	sourceRef: string | null;
+	createdAt: string;
+}
+
+/** 替换审计中的新条目快照(由 Memorizer 在知道新条目时提供;undo 反查用)。 */
+export interface ReplacementNewItem {
+	id: string;
+	memoryType: string;
+	summary: string;
+	sourceRef?: string;
+	happenedAt?: string;
+	extraJson?: string;
+}
+
 export function coerceFloat(value: unknown, fallback = 0): number {
 	if (typeof value === "number" && Number.isFinite(value)) return value;
 	if (typeof value === "string") {
@@ -218,7 +262,10 @@ export class MemoryStore {
 
 	constructor(dbPath: string, options: MemoryStoreOptions = {}) {
 		mkdirSync(dirname(dbPath), { recursive: true });
-		this.db = createSqliteDatabase(dbPath);
+		// allowExtension 必须开启:sqlite-vec 扩展经 loadExtension 加载,
+		// 缺省 node:sqlite 会抛 "extension loading is not allowed"(与
+		// storage-sqlite-node 的 session indexer 保持一致)。
+		this.db = createSqliteDatabase(dbPath, { allowExtension: true });
 		this.db.exec("PRAGMA journal_mode=WAL");
 		this.db.exec("PRAGMA busy_timeout=5000");
 		this.db.exec(SCHEMA);
@@ -370,7 +417,7 @@ export class MemoryStore {
 	}
 
 	/** Retire items (supersede) and log the replacements. */
-	markSupersededBatch(ids: readonly string[], sourceRef?: string): number {
+	markSupersededBatch(ids: readonly string[], sourceRef?: string, replacement?: ReplacementNewItem): number {
 		let count = 0;
 		const select = this.db.prepare(
 			"SELECT id, memory_type, summary, source_ref, happened_at, extra_json FROM memory_items WHERE id = ? AND status = 'active'",
@@ -405,18 +452,130 @@ export class MemoryStore {
 				row.source_ref,
 				row.happened_at,
 				row.extra_json,
-				"",
-				"",
-				"",
-				"",
-				"",
-				"",
+				replacement?.id ?? "",
+				replacement?.memoryType ?? "",
+				replacement?.summary ?? "",
+				replacement?.sourceRef?.trim() || null,
+				replacement?.happenedAt ?? null,
+				replacement?.extraJson ?? null,
 				sourceRef?.trim() || null,
 				nowIso(),
 			);
 			count++;
 		}
 		return count;
+	}
+
+	/** 按 source_ref 读取替换审计(缺省全部;akashic MemoryStore2.list_replacements)。 */
+	listReplacements(sourceRef?: string): ReplacementRecord[] {
+		const rows = this.db
+			.prepare(
+				`SELECT old_item_id, old_memory_type, old_summary, new_item_id, new_memory_type, new_summary,
+				        relation_type, source_ref, created_at
+				 FROM memory_replacements
+				 ${sourceRef ? "WHERE source_ref = ?" : ""}
+				 ORDER BY created_at ASC, id ASC`,
+			)
+			.all(...(sourceRef ? [sourceRef] : [])) as Array<{
+			old_item_id: string;
+			old_memory_type: string;
+			old_summary: string;
+			new_item_id: string;
+			new_memory_type: string;
+			new_summary: string;
+			relation_type: string;
+			source_ref: string | null;
+			created_at: string;
+		}>;
+		return rows.map((row) => ({
+			oldItemId: row.old_item_id,
+			oldMemoryType: row.old_memory_type,
+			oldSummary: row.old_summary,
+			newItemId: row.new_item_id,
+			newMemoryType: row.new_memory_type,
+			newSummary: row.new_summary,
+			relationType: row.relation_type,
+			sourceRef: row.source_ref,
+			createdAt: row.created_at,
+		}));
+	}
+
+	/**
+	 * 按消息 source 撤销记忆写入(akashic _undo_store_by_message_sources):
+	 * 1. 找出 source_ref 命中 messageIds 的条目,标记 superseded(不写替换审计);
+	 * 2. 恢复这些条目曾经替换掉的旧条目(仅当旧条目不再被其他 active 替换链引用)。
+	 */
+	undoByMessageSources(
+		messageIds: readonly string[],
+		dryRun = false,
+	): { affectedIds: string[]; restoredIds: string[]; rollbackSourceIds: string[] } {
+		const cleanIds = [...new Set(messageIds.map((id) => String(id).trim()).filter((id) => id.length > 0))];
+		if (cleanIds.length === 0) {
+			return { affectedIds: [], restoredIds: [], rollbackSourceIds: [] };
+		}
+		const targets = new Set(cleanIds);
+		const rows = this.db
+			.prepare("SELECT id, source_ref FROM memory_items WHERE COALESCE(source_ref, '') != ''")
+			.all() as Array<{ id: string; source_ref: string }>;
+
+		const affectedIds: string[] = [];
+		const rollbackSourceIds = new Set<string>();
+		for (const row of rows) {
+			const source = String(row.source_ref ?? "").trim();
+			if (!source) continue;
+			const sourceIds = sourceRefMessageIds(source);
+			if (targets.has(source) || (sourceIds.length > 0 && sourceIds.some((id) => targets.has(id)))) {
+				affectedIds.push(row.id);
+				rollbackSourceIds.add(source);
+			}
+		}
+
+		if (affectedIds.length > 0 && !dryRun) {
+			const update = this.db.prepare(
+				"UPDATE memory_items SET status = 'superseded', updated_at = ? WHERE id = ? AND status = 'active'",
+			);
+			for (const id of affectedIds) update.run(nowIso(), id);
+		}
+
+		const restoredIds = dryRun ? [] : this.restoreReplacementsForUndo(affectedIds);
+		return {
+			affectedIds: [...affectedIds].sort(),
+			restoredIds: [...restoredIds].sort(),
+			rollbackSourceIds: [...rollbackSourceIds].sort(),
+		};
+	}
+
+	/** 恢复 affectedIds 对应替换链中的旧条目(akashic _restore_replacements_for_undo)。 */
+	restoreReplacementsForUndo(affectedIds: readonly string[]): string[] {
+		const cleanIds = [...new Set(affectedIds.filter((id) => id.length > 0))];
+		if (cleanIds.length === 0) return [];
+		const placeholders = cleanIds.map(() => "?").join(", ");
+		const rows = this.db
+			.prepare(`SELECT DISTINCT old_item_id FROM memory_replacements WHERE new_item_id IN (${placeholders})`)
+			.all(...cleanIds) as Array<{ old_item_id: string }>;
+
+		const restored: string[] = [];
+		const update = this.db.prepare(
+			"UPDATE memory_items SET status = 'active', updated_at = ? WHERE id = ? AND status = 'superseded'",
+		);
+		for (const row of rows) {
+			const oldId = String(row.old_item_id).trim();
+			if (!oldId) continue;
+			const activeReplacement = this.db
+				.prepare(
+					`SELECT 1 FROM memory_replacements r
+					 JOIN memory_items m ON m.id = r.new_item_id
+					 WHERE r.old_item_id = ?
+					   AND r.new_item_id NOT IN (${placeholders})
+					   AND m.status = 'active'
+					 LIMIT 1`,
+				)
+				.get(oldId, ...cleanIds) as { "1": number } | undefined;
+			if (activeReplacement) continue;
+			const result = update.run(nowIso(), oldId);
+			if (result.changes > 0) restored.push(oldId);
+		}
+		return restored;
 	}
 
 	/** Soft-delete (forget) items; superseded rows stay queryable via replacements log. */
@@ -684,9 +843,12 @@ export class MemoryStore {
 		if (cleanTerms.length === 0) return [];
 		const limit = options.topK ?? 20;
 
-		const likeVals = cleanTerms.map((term) => `%${term}%`);
-		const orConditions = cleanTerms.map(() => "summary LIKE ?").join(" OR ");
-		const scoreExpr = cleanTerms.map(() => "(CASE WHEN summary LIKE ? THEN 1 ELSE 0 END)").join(" + ");
+		const likeVals = cleanTerms.flatMap((term) => [`%${term}%`, `%${term}%`]);
+		// summary 命中记 1 分,extra_json(trigger_tags 等)命中记 0.5 分。
+		const orConditions = cleanTerms.map(() => "(summary LIKE ? OR extra_json LIKE ?)").join(" OR ");
+		const scoreExpr = cleanTerms
+			.map(() => "(CASE WHEN summary LIKE ? THEN 1 ELSE 0 END) + (CASE WHEN extra_json LIKE ? THEN 0.5 ELSE 0 END)")
+			.join(" + ");
 
 		const clauses: string[] = ["status = 'active'"];
 		const params: (string | number)[] = [];

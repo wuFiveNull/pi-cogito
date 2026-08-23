@@ -260,6 +260,25 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	shouldStopAfterTurn?: (context: ShouldStopAfterTurnContext) => boolean | Promise<boolean>;
 
 	/**
+	 * 查询内压缩(akashic QueryCompactor):长工具循环中上下文估算超过阈值时,
+	 * 把较早的已完成批次压缩为摘要并投影回上下文,避免 provider context overflow。
+	 * 只影响本次查询内的后续轮次,不写入持久化状态。
+	 */
+	queryCompaction?: {
+		enabled?: boolean;
+		/** 触发阈值 = contextWindow * triggerPercent。默认 0.74。 */
+		triggerPercent?: number;
+		/** 保留尾部(活跃批次)的 assistant+toolResult 对数。默认 1。 */
+		keepRecentBatches?: number;
+		/** 模型上下文窗口(缺省用 model.contextWindow)。 */
+		contextWindow?: number;
+		/** 摘要生成器(缺省用主模型跑一次无工具补全)。 */
+		summarize?: (segment: AgentMessage[], signal?: AbortSignal) => Promise<string>;
+		/** 当前上下文 token 估算(缺省 estimateContextTokens)。 */
+		estimate?: (messages: AgentMessage[]) => number;
+	};
+
+	/**
 	 * Called after `turn_end` and before the loop decides whether another provider request should start.
 	 * Return replacement context/model/thinking state to affect the next turn in this run.
 	 * Return undefined to keep using the current context/config.

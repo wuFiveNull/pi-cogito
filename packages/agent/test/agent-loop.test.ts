@@ -10,6 +10,7 @@ import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { agentLoop, agentLoopContinue } from "../src/agent-loop.ts";
 import { setDefaultStreamFn } from "../src/index.ts";
+import { QUERY_COMPACTION_CUSTOM_TYPE, QUERY_COMPACTION_PREFIX } from "../src/query-compaction.ts";
 import type { AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool } from "../src/types.ts";
 
 // Mock stream for testing - mimics MockAssistantStream
@@ -1486,5 +1487,125 @@ describe("agentLoopContinue with AgentMessage", () => {
 		const messages = await stream.result();
 		expect(messages.length).toBe(1);
 		expect(messages[0].role).toBe("assistant");
+	});
+});
+
+describe("query compaction persistence (cross-turn)", () => {
+	it("replays persisted markers on the next turn, dropping covered messages", async () => {
+		const covered: AgentMessage[] = [];
+		for (let i = 0; i < 10; i++) covered.push(createUserMessage(`m${i}`));
+		covered.push(createAssistantMessage([{ type: "text", text: "a1" }]));
+		covered.push({
+			role: "toolResult",
+			toolCallId: "c1",
+			toolName: "read_file",
+			content: [{ type: "text", text: "r1" }],
+			isError: false,
+			timestamp: Date.now(),
+		});
+		const marker: AgentMessage = {
+			role: "custom",
+			customType: QUERY_COMPACTION_CUSTOM_TYPE,
+			content: `${QUERY_COMPACTION_PREFIX}阶段摘要`,
+			display: false,
+			details: { startIndex: 0, coveredCount: 10, contextWindow: 8192 },
+			timestamp: Date.now(),
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [...covered, marker], tools: [] };
+
+		let seenMessages: AgentMessage[] = [];
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: (messages) => {
+				seenMessages = [...messages];
+				return identityConverter(messages);
+			},
+		};
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				stream.push({
+					type: "done",
+					reason: "stop",
+					message: createAssistantMessage([{ type: "text", text: "ok" }]),
+				});
+			});
+			return stream;
+		};
+		await agentLoop([createUserMessage("继续")], context, config, undefined, streamFn).result();
+
+		// 被覆盖的 10 条历史与 marker 不在 LLM 上下文中,摘要投影在。
+		expect(seenMessages.some((m) => m.role === "user" && m.content === "m0")).toBe(false);
+		expect(seenMessages.some((m) => m.role === "custom")).toBe(false);
+		expect(seenMessages.some((m) => m.role === "user" && String(m.content).includes("阶段摘要"))).toBe(true);
+		// 保留尾批仍在。
+		expect(seenMessages.some((m) => m.role === "toolResult")).toBe(true);
+	});
+
+	it("emits a persistent marker when query compaction fires inside a tool loop", async () => {
+		const tool: AgentTool<any> = {
+			name: "echo",
+			label: "Echo",
+			description: "Echo tool",
+			parameters: { type: "object", properties: { value: { type: "string" } } },
+			async execute(_toolCallId, params) {
+				return {
+					content: [{ type: "text", text: `echoed: ${(params as { value?: string }).value}` }],
+					details: undefined,
+				};
+			},
+		};
+		const context: AgentContext = { systemPrompt: "", messages: [], tools: [tool] };
+		const config: AgentLoopConfig = {
+			model: createModel(),
+			convertToLlm: identityConverter,
+			queryCompaction: {
+				enabled: true,
+				contextWindow: 1000,
+				triggerPercent: 0.5,
+				estimate: () => 900,
+				summarize: async () => "压缩摘要",
+			},
+		};
+		let callIndex = 0;
+		const streamFn = () => {
+			const stream = new MockAssistantStream();
+			queueMicrotask(() => {
+				if (callIndex < 2) {
+					const message = createAssistantMessage(
+						[{ type: "toolCall", id: `t${callIndex}`, name: "echo", arguments: { value: "x" } }],
+						"toolUse",
+					);
+					stream.push({ type: "done", reason: "toolUse", message });
+				} else {
+					stream.push({
+						type: "done",
+						reason: "stop",
+						message: createAssistantMessage([{ type: "text", text: "done" }]),
+					});
+				}
+				callIndex++;
+			});
+			return stream;
+		};
+		const events: AgentEvent[] = [];
+		const stream = agentLoop([createUserMessage("任务")], context, config, undefined, streamFn);
+		for await (const event of stream) {
+			events.push(event);
+		}
+		const messages = await stream.result();
+
+		const markerEvents = events.filter(
+			(e) =>
+				e.type === "message_end" &&
+				e.message.role === "custom" &&
+				(e.message as { customType?: string }).customType === QUERY_COMPACTION_CUSTOM_TYPE,
+		);
+		expect(markerEvents).toHaveLength(1);
+		expect(
+			messages.some(
+				(m) => m.role === "custom" && (m as { customType?: string }).customType === QUERY_COMPACTION_CUSTOM_TYPE,
+			),
+		).toBe(true);
 	});
 });

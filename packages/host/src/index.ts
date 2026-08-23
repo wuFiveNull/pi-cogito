@@ -174,9 +174,28 @@ export type {
 	ConsolidationBridgeResult,
 	ConsolidationLlm,
 } from "./core/memory/consolidation-bridge.ts";
-export type { MemoryEngine, MemoryEngineOptions } from "./core/memory/index.ts";
+export type {
+	MemoryEngine,
+	MemoryEngineFactory,
+	MemoryEngineOptions,
+	MemoryQueryIntent,
+	PostResponseLlm,
+	PostResponseRunOptions,
+	PostResponseRunResult,
+	PostResponseWorkerOptions,
+	ToolChainCall,
+} from "./core/memory/index.ts";
 // Memory engine
-export { ConsolidationBridge, createMemoryEngine, Memorizer, MemoryStore, Retriever } from "./core/memory/index.ts";
+export {
+	ConsolidationBridge,
+	createMemoryEngine,
+	listMemoryEngineFactories,
+	Memorizer,
+	MemoryStore,
+	PostResponseMemoryWorker,
+	Retriever,
+	registerMemoryEngineFactory,
+} from "./core/memory/index.ts";
 export type {
 	BehaviorUpdate,
 	InjectionBlock,

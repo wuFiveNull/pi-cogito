@@ -89,6 +89,14 @@ export interface RetrieverOptions {
 	hotnessHalfLifeDays?: number;
 }
 
+/** 检索意图(akashic MemoryQuery.intent)。 */
+export type MemoryQueryIntent = "context" | "answer" | "procedure" | "interest" | "timeline";
+
+/** 单轮文本补全(与 agent MemoryLlm 同形;HyDE 假设生成、post-response 判定共用)。 */
+export interface PostResponseLlm {
+	chat(system: string, user: string, maxTokens: number): Promise<string>;
+}
+
 export interface RetrieveOptions {
 	memoryTypes?: readonly MemoryType[];
 	topK?: number;
@@ -99,6 +107,17 @@ export interface RetrieveOptions {
 	timeStart?: Date;
 	timeEnd?: Date;
 	keywordEnabled?: boolean;
+	/**
+	 * 检索意图路由(akashic MemoryQuery.intent):
+	 * - context: 默认,当前查询原样检索;
+	 * - answer: 用 hypothesisLlm 生成两条 HyDE 假想记忆条目并入 auxQueries;
+	 * - procedure: memoryTypes 缺省为 ["procedure"];
+	 * - interest: memoryTypes 缺省为 ["preference", "profile"];
+	 * - timeline: 原样检索,时间过滤由调用方传 timeStart/timeEnd。
+	 */
+	intent?: MemoryQueryIntent;
+	/** HyDE 假设生成器(intent=answer 时使用;缺失或失败时降级为原查询)。 */
+	hypothesisLlm?: PostResponseLlm;
 }
 
 export interface SaveItemOptions {
