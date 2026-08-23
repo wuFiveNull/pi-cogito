@@ -27,6 +27,8 @@ export interface RawItem {
 	url?: string;
 	summary?: string;
 	publishedAt?: number;
+	/** 兴趣分 [0,1],wake 用。 */
+	preprocessScore?: number;
 }
 
 /** 主动推送数据源接口。 */
@@ -45,6 +47,7 @@ interface McpServerConfig {
 	url?: string;
 	socket?: string;
 	headers?: Record<string, string>;
+	env?: Record<string, string>;
 }
 
 /**
@@ -65,7 +68,14 @@ export abstract class McpExtensionSource implements ProactiveSource {
 	private serverConfig(): McpServerConfig | undefined {
 		const entry = loadMcpServerConfig(this.serverName);
 		if (!entry) return undefined;
-		return { name: this.serverName, command: entry.command, args: entry.args, url: entry.url, headers: entry.headers };
+		return {
+			name: this.serverName,
+			command: entry.command,
+			args: entry.args,
+			url: entry.url,
+			headers: entry.headers,
+			env: entry.env,
+		};
 	}
 
 	async fetch(config: unknown): Promise<RawItem[]> {
@@ -87,6 +97,7 @@ export abstract class McpExtensionSource implements ProactiveSource {
 				args: server.args,
 				url: server.url,
 				headers: server.headers,
+				env: server.env,
 				lifecycle: "eager",
 			});
 			const connection = manager.getConnection(server.name);
@@ -120,7 +131,7 @@ function normalizeToolResult(tool: string, result: unknown): RawItem[] {
 
 	const items: RawItem[] = [];
 	if (Array.isArray(list)) {
-		for (const entry of list) {
+		for (const [index, entry] of list.entries()) {
 			if (typeof entry !== "object" || entry === null) continue;
 			const record = entry as Record<string, unknown>;
 			const title = firstString(record, ["title", "name", "subject", "topic_title", "full_name"]);
@@ -131,6 +142,7 @@ function normalizeToolResult(tool: string, result: unknown): RawItem[] {
 				url: firstString(record, ["url", "link", "html_url", "mobileUrl"]),
 				summary: firstString(record, ["desc", "description", "summary", "content", "excerpt"]),
 				publishedAt: firstNumber(record, ["timestamp", "created_at", "published_at", "onboard_time"]),
+				preprocessScore: scoreFor(record, index),
 			});
 		}
 	}
@@ -143,6 +155,15 @@ function normalizeToolResult(tool: string, result: unknown): RawItem[] {
 		items.push({ source: tool, title: trimmed.slice(0, 200) });
 	}
 	return items;
+}
+
+/** 兴趣分 [0,1]:有 stars/likes/hot 数值按对数归一化,否则按位次递减(0.9 起每名 -0.08)。 */
+function scoreFor(record: Record<string, unknown>, index: number): number {
+	const heat = firstNumber(record, ["stars", "likes", "hot", "score", "popularity"]);
+	if (typeof heat === "number" && Number.isFinite(heat) && heat > 0) {
+		return Math.min(0.95, Math.max(0.05, 0.25 + Math.log10(1 + heat) / 10));
+	}
+	return Math.max(0.05, 0.9 - index * 0.08);
 }
 
 function contentText(result: unknown): string {
@@ -197,12 +218,13 @@ interface McpJsonServer {
 	args?: string[];
 	url?: string;
 	headers?: Record<string, string>;
+	env?: Record<string, string>;
 }
 
-/** 读 ~/.cogito/agent/mcp.json 的 server 配置(与 pi agent 运行时共用)。 */
+/** 读 agent 目录的 mcp.json 的 server 配置(与 pi agent 运行时共用)。 */
 export function loadMcpServerConfig(name: string): McpJsonServer | undefined {
 	try {
-		const path = join(homedir(), ".cogito", "agent", "mcp.json");
+		const path = mcpJsonPath();
 		const parsed = JSON.parse(readFileSync(path, "utf-8")) as {
 			mcpServers?: Record<string, McpJsonServer>;
 		};
@@ -210,4 +232,11 @@ export function loadMcpServerConfig(name: string): McpJsonServer | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+/** mcp.json 路径:优先跟随 agent 目录环境变量,否则默认 home 下的 agent 目录。 */
+function mcpJsonPath(): string {
+	const agentDir = process.env.COGITO_CODING_AGENT_DIR || process.env.PI_AGENT_DIR;
+	if (agentDir) return join(agentDir, "mcp.json");
+	return join(homedir(), ".cogito", "agent", "mcp.json");
 }

@@ -27,6 +27,8 @@ interface RawItem {
 	url?: string;
 	summary?: string;
 	publishedAt?: number;
+	/** 兴趣分 [0,1],wake 用;有 hot 按热度归一化,否则按位次递减。 */
+	preprocessScore?: number;
 }
 
 /** 主动推送数据源接口:一个模块 = 一个源(default export class)。 */
@@ -83,19 +85,28 @@ export default class DailyhotSource implements ProactiveSource {
 				};
 				if (!mod.handleRoute) continue;
 				const result = await mod.handleRoute({ req: { query: () => undefined } }, false);
-				for (const item of result.data.slice(0, limit)) {
+				result.data.slice(0, limit).forEach((item, index) => {
 					items.push({
 						source: platform,
 						title: item.title,
 						url: item.url,
 						summary: item.desc,
 						publishedAt: item.timestamp,
+						preprocessScore: scoreFor(item.hot, index),
 					});
-				}
+				});
 			} catch {
 				// One platform failure must not drop the others.
 			}
 		}
 		return items;
+	}
+
+	/** 兴趣分:有 hot(热度值)按对数归一化,否则按位次递减(0.9 起每名 -0.08)。 */
+	private scoreFor(hot: number | undefined, index: number): number {
+		if (typeof hot === "number" && Number.isFinite(hot) && hot > 0) {
+			return Math.min(0.95, Math.max(0.05, 0.25 + Math.log10(1 + hot) / 10));
+		}
+		return Math.max(0.05, 0.9 - index * 0.08);
 	}
 }

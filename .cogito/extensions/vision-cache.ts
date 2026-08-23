@@ -73,6 +73,8 @@ interface ExtensionConfig {
 	maxRetries: number;
 	concurrency: number;
 	requestTimeoutMs: number;
+	/** Extra chat/completions body fields (e.g. {"reasoning": {"enabled": false}} to disable thinking). */
+	extraBody?: Record<string, unknown>;
 }
 
 interface ResolvedVisionModel {
@@ -207,6 +209,7 @@ export default function (pi: ExtensionAPI) {
 						},
 					],
 					max_tokens: config.maxTokens,
+					...(config.extraBody ?? {}),
 				}),
 			});
 
