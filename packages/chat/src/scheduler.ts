@@ -145,6 +145,13 @@ export class ChatScheduler {
 	}
 
 	private async fire(job: ChatScheduleJob, now: number): Promise<void> {
+		// 占用下一次触发槽位,防止生成/投递耗时期间(soft 生成可达数十秒)
+		// 后续 tick 重复触发同一到期的任务。
+		if (job.intervalMs !== undefined) {
+			job.nextFireAt = new Date(now + job.intervalMs).toISOString();
+		} else {
+			job.enabled = false;
+		}
 		try {
 			const content = job.tier === "soft" ? await this.deps.generateSoft(job).catch(() => "") : job.prompt;
 			if (content.length > 0) {
@@ -154,11 +161,6 @@ export class ChatScheduler {
 			job.lastFiredAt = new Date(now).toISOString();
 		} catch (error) {
 			this.deps.log?.(`scheduled job ${job.id} failed: ${error instanceof Error ? error.message : String(error)}`);
-		}
-		if (job.intervalMs !== undefined) {
-			job.nextFireAt = new Date(now + job.intervalMs).toISOString();
-		} else {
-			job.enabled = false;
 		}
 		this.persist();
 	}
