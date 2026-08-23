@@ -23,7 +23,7 @@ import type {
 	DriftEventSink,
 	DriftStagedDelivery,
 } from "@cogito/gate";
-import { DriftGateStore, DriftStagedDeliveryStore, hashOutboundMessage } from "@cogito/gate";
+import { DriftGateStore, DriftStagedDeliveryStore, hashOutboundMessage, normalizeOutboundText } from "@cogito/gate";
 import { ConsolidationBridge, createMemoryEngine, type MemoryEngine, type ModelRuntime } from "@cogito/host";
 import { BeforeTurn, Delivered, DriftEventObserved, EventBus } from "./bus.ts";
 import { type Clock, clockFromEnv, ReplayClock } from "./clock.ts";
@@ -52,7 +52,13 @@ import {
 	readHistoricalReplayEvents,
 } from "./replay.ts";
 import { defaultRulesPath, ProactiveRules } from "./rules.ts";
-import { mergeRuntimePorts, type ProactiveRuntimePorts, StandaloneRuntimeAdapter } from "./runtime/ports.ts";
+import {
+	createStandaloneBusyPort,
+	createStandaloneSessionPort,
+	mergeRuntimePorts,
+	type ProactiveRuntimePorts,
+	StandaloneRuntimeAdapter,
+} from "./runtime/ports.ts";
 import { SourceAckCoordinator } from "./runtime/source-ack.ts";
 import { SourceHealthTracker } from "./runtime/source-health.ts";
 import { createDefaultStages, type DefaultStagesConfig, type DefaultStagesDeps } from "./stages/defaults.ts";
@@ -194,7 +200,7 @@ export interface DriftConfig {
 	minIntervalHours?: number;
 	/** 三进程模式:「允许」许可的 TTL(小时);默认 1。 */
 	gateTtlHours?: number;
-	/** Drift 工作区目录(默认 ~/.cogito/agent/drift)。 */
+	/** Drift 工作区目录(默认 <cwd>/.cogito/extensions/drift)。 */
 	driftDir?: string;
 	/** Drift 内部 HTTP 访问策略(如允许私网、重定向跳数)。 */
 	webPolicy?: { allowPrivateNetwork?: boolean; maxRedirectHops?: number };
@@ -225,8 +231,10 @@ export interface PusherConfig extends DefaultStagesConfig {
 	sourceAck?: { retryBaseDelayMs?: number; retryMaxDelayMs?: number };
 	/** 生命周期 id:default / wake / 插件自定义(akashic lifecycle)。 */
 	lifecycle?: string;
-	/** Directory containing source modules (default: ./src/sources). */
-	sourcesDir?: string;
+	/**
+	 * 数据源/插件挂载目录固定为 <cwd>/.cogito/extensions/proactive,
+	 * 不再支持 sourcesDir 配置(目录为空时回退包内置 sources)。
+	 */
 	/** Path of the proactive.sqlite database (default: ./proactive.sqlite). */
 	dbPath?: string;
 	/** Sessions directory for presence sensing. */
@@ -293,11 +301,30 @@ export function createDriftEventSink(eventBus: EventBus): DriftEventSink {
 	};
 }
 
-const DEFAULT_CONFIG: Required<Pick<PusherConfig, "sourcesDir" | "dbPath" | "sessionsDir">> = {
-	sourcesDir: join(import.meta.dirname, "sources"),
+const DEFAULT_CONFIG: Required<Pick<PusherConfig, "dbPath" | "sessionsDir">> = {
 	dbPath: join(import.meta.dirname, "..", "proactive.sqlite"),
-	sessionsDir: join(process.env.HOME ?? "/tmp", ".cogito", "agent", "sessions"),
+	sessionsDir: join(defaultAgentDir(), "channel-agent-sessions"),
 };
+
+/** Agent 主目录:优先跟随环境变量,否则默认 home 下的 .cogito/agent。 */
+function defaultAgentDir(): string {
+	return (
+		process.env.COGITO_CODING_AGENT_DIR ||
+		process.env.PI_AGENT_DIR ||
+		join(process.env.HOME ?? "/tmp", ".cogito", "agent")
+	);
+}
+
+/** 包内置 sources(挂载目录为空时的兜底,代码内置非挂载)。 */
+const BUILTIN_SOURCES_DIR = join(import.meta.dirname, "sources");
+
+/**
+ * 数据源/插件挂载目录(唯一):项目 .cogito/extensions/proactive。
+ * 函数式:每次调用按当前 cwd 解析(测试可 chdir 注入临时挂载目录)。
+ */
+export function proactiveExtDir(): string {
+	return join(process.cwd(), ".cogito", "extensions", "proactive");
+}
 
 export function loadPusherConfig(configPath: string): PusherConfig {
 	let text: string;
@@ -334,7 +361,6 @@ function validatePusherConfig(value: unknown, configPath: string): asserts value
 		"preset",
 		"sessionKey",
 		"lifecycle",
-		"sourcesDir",
 		"dbPath",
 		"sessionsDir",
 		"rulesPath",
@@ -623,7 +649,6 @@ const JSON_CONFIG_ROOT_KEYS: ReadonlySet<string> = new Set([
 	"preset",
 	"sessionKey",
 	"lifecycle",
-	"sourcesDir",
 	"dbPath",
 	"sessionsDir",
 	"rulesPath",
@@ -716,10 +741,10 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 	const sessionKey = config.sessionKey ?? DEFAULT_SESSION_KEY;
 	const scopedEventBus = eventBus.scope(sessionKey);
 	const passiveTurn = new PassiveTurnLifecycle(scopedEventBus, { clock });
-	const sourcesDir = config.sourcesDir ?? DEFAULT_CONFIG.sourcesDir;
-	// 插件加载:用户扩展目录(extensions/proactive/)优先,内置目录兜底。
-	const customSourcesDir = join(process.cwd(), ".cogito", "extensions", "proactive");
-	const loadedPlugins = await loadPlugins(customSourcesDir, sourcesDir);
+	// 挂载目录唯一:只从 <cwd>/.cogito/extensions/proactive 加载;目录为空时
+	// 回退包内置 sources(内置目录不是挂载点)。
+	const mountPlugins = await loadPlugins(proactiveExtDir());
+	const loadedPlugins = mountPlugins.length > 0 ? mountPlugins : await loadPlugins(BUILTIN_SOURCES_DIR);
 	const registry = new PluginRegistry();
 	registry.registerMany(loadedPlugins.map((loaded) => loaded.plugin));
 	const sourceRegistrations = registry.collectSourceRegistrations();
@@ -736,7 +761,7 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 		});
 	}
 	if (sourceRegistrations.length === 0) {
-		throw new Error(`No sources found in ${sourcesDir}`);
+		throw new Error(`No sources found in ${proactiveExtDir()}`);
 	}
 
 	const store = new ProactiveStore(config.dbPath ?? DEFAULT_CONFIG.dbPath, clock);
@@ -761,7 +786,24 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 	const dbPath = config.dbPath ?? DEFAULT_CONFIG.dbPath;
 	const sessionsDir = config.sessionsDir ?? DEFAULT_CONFIG.sessionsDir;
 	const standaloneRuntime = new StandaloneRuntimeAdapter({ store, memoryDbPath, sessionsDir, sessionKey });
-	const runtimePorts = mergeRuntimePorts(standaloneRuntime.ports, config.runtimePorts);
+	// 默认端口:会话写回(投递成功后追加 jsonl)+ busy 近窗判定(用户消息后
+	// busyWindowSeconds 内不打扰);宿主可经 runtimePorts 覆盖。
+	const runtimePorts = mergeRuntimePorts(standaloneRuntime.ports, {
+		...config.runtimePorts,
+		session:
+			config.runtimePorts?.session ??
+			createStandaloneSessionPort({
+				sessionsDir,
+				sessionKey,
+				log: (message) => console.error(`proactive session-port: ${message}`),
+			}),
+		busy:
+			config.runtimePorts?.busy ??
+			createStandaloneBusyPort({
+				presence: standaloneRuntime.ports.presence,
+				busyWindowSeconds: config.gate?.busyWindowSeconds,
+			}),
+	});
 	// 嵌入 API(drift recall_memory 向量召回 + wake 语义兴趣共用;未配置时 undefined)。
 	const embeddingApi = buildEmbeddingApi(config.embeddings);
 
@@ -772,7 +814,10 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 	const driftConfig = config.drift ?? {};
 	const driftEnabled = driftConfig.enabled ?? false;
 	const driftDir =
-		driftConfig.driftDir ?? (driftEnabled ? join(agentDir, "drift") : join(storeDbDir(dbPath), ".drift-disabled"));
+		driftConfig.driftDir ??
+		(driftEnabled
+			? join(process.cwd(), ".cogito", "extensions", "drift")
+			: join(storeDbDir(dbPath), ".drift-disabled"));
 	const pluginBaseDirs = new Map(loadedPlugins.map((loaded) => [loaded.plugin.name, dirname(loaded.path)]));
 	const _pluginSkillRoots = registry
 		.list()
@@ -865,6 +910,16 @@ export async function buildPusher(config: PusherConfig): Promise<PusherHandle> {
 			}
 			if (message.trim() && store.recentDeliveredMessages(5).some((item) => item.trim() === message.trim())) {
 				return { duplicate: true, reason: "最近推送过相同消息" };
+			}
+			// 归一化比较:捕获换行/标点差异的语义重复(akashic MessageDeduper 的规则版)。
+			if (message.trim()) {
+				const normalized = normalizeOutboundText(message);
+				if (
+					normalized &&
+					store.recentDeliveredMessages(20).some((item) => normalizeOutboundText(item) === normalized)
+				) {
+					return { duplicate: true, reason: "最近推送过语义相同(归一化)的消息" };
+				}
 			}
 			return { duplicate: false };
 		},
@@ -1608,9 +1663,7 @@ export async function runReloadablePusher(
 	config: PusherConfig,
 	options: { configPath?: string } = {},
 ): Promise<{ stop: () => Promise<void> }> {
-	const sourcesDir = config.sourcesDir ?? DEFAULT_CONFIG.sourcesDir;
-	const customSourcesDir = join(process.cwd(), ".cogito", "extensions", "proactive");
-	const watchPaths = [sourcesDir, customSourcesDir];
+	const watchPaths = [proactiveExtDir()];
 	const configPath = options.configPath;
 	if (configPath && config.reload?.watchConfig !== false) watchPaths.push(configPath);
 	const build = configPath
@@ -1640,7 +1693,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
 	const run = config.reload?.enabled ? runReloadablePusher(config, { configPath }) : runPusher(config);
 	run.then(() => {
 		console.error(
-			`proactive pusher running (sources dir: ${config.sourcesDir ?? DEFAULT_CONFIG.sourcesDir}, db: ${config.dbPath ?? DEFAULT_CONFIG.dbPath})`,
+			`proactive pusher running (sources dir: ${proactiveExtDir()}, db: ${config.dbPath ?? DEFAULT_CONFIG.dbPath})`,
 		);
 	}).catch((error) => {
 		console.error(`proactive pusher failed: ${error instanceof Error ? error.message : String(error)}`);

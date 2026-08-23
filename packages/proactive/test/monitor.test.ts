@@ -328,14 +328,14 @@ describe("proactive monitor (akashic dashboard API port)", () => {
 		tempDirs.push(agentDir);
 		const driftDbPath = join(agentDir, "drift.db");
 		const db = new DatabaseSync(driftDbPath);
-		db.exec(`CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_at TEXT NOT NULL,
+		db.exec(`CREATE TABLE runs (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, session_key TEXT NOT NULL DEFAULT 'local', run_at TEXT NOT NULL,
 			skill_name TEXT NOT NULL, status TEXT NOT NULL, briefing TEXT NOT NULL,
 			message_result TEXT NOT NULL, message_hash TEXT);
 			CREATE TABLE run_steps (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER,
 			step_index INTEGER NOT NULL, tool_name TEXT NOT NULL, input_preview TEXT NOT NULL DEFAULT '',
 			output_preview TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL);
-			INSERT INTO runs (run_at, skill_name, status, briefing, message_result, message_hash)
-			VALUES ('2026-05-01T00:00:00Z', 'skill-a', 'completed', '审计了一条记忆', 'sent', 'h1');
+			INSERT INTO runs (run_id, session_key, run_at, skill_name, status, briefing, message_result, message_hash)
+			VALUES ('run-1', 'local', '2026-05-01T00:00:00Z', 'skill-a', 'completed', '审计了一条记忆', 'sent', 'h1');
 			INSERT INTO run_steps (run_id, step_index, tool_name, input_preview, output_preview, created_at)
 			VALUES (1, 1, 'read_file', 'x', 'ok', '2026-05-01T00:00:00Z');`);
 		db.close();

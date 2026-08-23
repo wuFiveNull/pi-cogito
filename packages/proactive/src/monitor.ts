@@ -22,6 +22,11 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { DatabaseSync } from "node:sqlite";
+import {
+	DRIFT_ACTIVE_RUNS_OBSERVATION_COLUMNS,
+	DRIFT_RUN_STEPS_OBSERVATION_COLUMNS,
+	DRIFT_RUNS_OBSERVATION_COLUMNS,
+} from "@cogito/gate";
 import type { EventBus } from "./bus.ts";
 import { RuntimeReplayJournal } from "./ext/snapshot.ts";
 import { readHistoricalReplayAudit } from "./replay.ts";
@@ -610,7 +615,7 @@ function loadDriftTimeline(
 	const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
 	const rows = db
 		.prepare(
-			`SELECT id, run_id, session_key, run_at, skill_name, status, briefing, message_result
+			`SELECT ${DRIFT_RUNS_OBSERVATION_COLUMNS}
 			 FROM runs ${whereSql}`,
 		)
 		.all(...args) as Array<Record<string, unknown>>;
@@ -656,7 +661,7 @@ function listDriftRuns(db: DatabaseSync, params: URLSearchParams): PageResult {
 	const total = (db.prepare(`SELECT COUNT(*) AS count FROM runs ${where}`).get(...args) as { count: number }).count;
 	const items = db
 		.prepare(
-			`SELECT id, run_at, skill_name, status, briefing, message_result, message_hash
+			`SELECT ${DRIFT_RUNS_OBSERVATION_COLUMNS}
 			 FROM runs ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
 		)
 		.all(...args, pageSize, (page - 1) * pageSize);
@@ -673,7 +678,7 @@ function listDriftSteps(db: DatabaseSync, params: URLSearchParams): PageResult {
 		.count;
 	const items = db
 		.prepare(
-			`SELECT id, run_id, step_index, tool_name, input_preview, output_preview, created_at
+			`SELECT ${DRIFT_RUN_STEPS_OBSERVATION_COLUMNS}
 			 FROM run_steps ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
 		)
 		.all(...args, pageSize, (page - 1) * pageSize);
@@ -686,7 +691,7 @@ function listDriftActiveRuns(db: DatabaseSync, params: URLSearchParams): PageRes
 	const total = (db.prepare("SELECT COUNT(*) AS count FROM drift_active_runs").get() as { count: number }).count;
 	const items = db
 		.prepare(
-			`SELECT run_id, session_key, started_at, updated_at, stage, skill_name, message_hash
+			`SELECT ${DRIFT_ACTIVE_RUNS_OBSERVATION_COLUMNS}
 			 FROM drift_active_runs ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
 		)
 		.all(pageSize, (page - 1) * pageSize);
@@ -707,7 +712,7 @@ function getDriftDiagnostics(db: DatabaseSync, runId: string): Record<string, un
 	const historyId = Number(run?.id ?? 0);
 	const steps = db
 		.prepare(
-			`SELECT id, run_id, run_key, step_index, tool_name, input_preview, output_preview, created_at
+			`SELECT ${DRIFT_RUN_STEPS_OBSERVATION_COLUMNS}, run_key
 			 FROM run_steps WHERE run_key = ? OR (? > 0 AND run_id = ?) ORDER BY id ASC`,
 		)
 		.all(runId, historyId, historyId);

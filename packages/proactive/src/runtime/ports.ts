@@ -10,6 +10,7 @@
 import { formatPreferenceBlock, type RecalledPreference, recallPreferences } from "@cogito/gate";
 import { DEFAULT_SESSION_KEY, scanSessionsDir } from "../stages/sense.ts";
 import type { DeliveryTargetReceipt, ProactiveStore } from "../store.ts";
+import { appendProactiveToSessionLog } from "./session-log.ts";
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -119,7 +120,47 @@ export interface StandaloneRuntimeAdapterOptions {
 }
 
 /**
- * Minimal adapter used when no host runtime is supplied. It keeps local
+ * 默认会话写回端口:投递成功后把推送追加到 sessionsDir 的会话 jsonl
+ * (drift fetch_messages 兼容格式)。仅当宿主未提供 session 端口时使用。
+ */
+export function createStandaloneSessionPort(options: {
+	sessionsDir: string;
+	sessionKey: string;
+	log?: (message: string) => void;
+}): ProactiveSessionPort {
+	return {
+		appendAssistantMessage: ({ sessionKey, content, timestamp }) => {
+			appendProactiveToSessionLog({
+				sessionsDir: options.sessionsDir,
+				sessionKey: sessionKey ?? options.sessionKey,
+				content,
+				timestamp,
+				log: options.log,
+			});
+		},
+	};
+}
+
+/**
+ * 默认 busy 端口:presence.last_user_at 距今 < busyWindowSeconds 视为"用户
+ * 正在对话中",proactive 不打扰(三进程模型下 gateway 实时 busy 不可得,
+ * presence 近窗是最接近 akashic processing_state.is_busy 的近似)。
+ */
+export function createStandaloneBusyPort(options: {
+	presence: ProactivePresencePort | undefined;
+	busyWindowSeconds?: number;
+}): ProactiveBusyPort {
+	const windowMs = Math.max(1, (options.busyWindowSeconds ?? 120) * 1000);
+	return {
+		isBusy: (sessionKey, now) => {
+			const snapshot = options.presence?.get?.(sessionKey);
+			if (!snapshot?.lastUserAt) return false;
+			return now.getTime() - snapshot.lastUserAt < windowMs;
+		},
+	};
+}
+
+/** Minimal adapter used when no host runtime is supplied. It keeps local
  * presence and preference recall working while leaving session/channel
  * authority to the existing standalone implementations.
  */

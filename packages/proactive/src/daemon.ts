@@ -41,7 +41,8 @@ export async function runProactiveDaemon(options: ProactiveDaemonOptions = {}): 
 	}
 
 	const config = loadPusherConfig(options.configPath ?? join(cwd, "proactive.json"));
-	const driftDir = config.drift?.driftDir ?? join(agentDir, "drift");
+	// 挂载目录统一在项目 .cogito/extensions 下(与 proactive 扩展同层)。
+	const driftDir = config.drift?.driftDir ?? join(cwd, ".cogito", "extensions", "drift");
 	const driftGateStore = new DriftGateStore({ driftDir });
 	const driftGate: DriftGateWriter = (gate) => driftGateStore.writeDriftGate(gate);
 

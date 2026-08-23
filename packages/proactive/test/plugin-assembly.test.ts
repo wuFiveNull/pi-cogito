@@ -14,15 +14,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runPusher } from "../src/index.ts";
 
 const tempDirs: string[] = [];
+const originalCwd = process.cwd();
 
 function makeWorkDir(): { workDir: string; sourcesDir: string; dbPath: string; sessionsDir: string } {
 	const workDir = mkdtempSync(join(tmpdir(), "plugin-assembly-"));
 	tempDirs.push(workDir);
-	const sourcesDir = join(workDir, "sources");
+	// 挂载目录唯一:临时 cwd 下的 .cogito/extensions/proactive。
+	const sourcesDir = join(workDir, ".cogito", "extensions", "proactive");
 	const dbPath = join(workDir, "proactive.sqlite");
 	const sessionsDir = join(workDir, "sessions");
 	mkdirSync(sourcesDir, { recursive: true });
 	mkdirSync(sessionsDir, { recursive: true });
+	// 挂载目录按 cwd 解析:每个测试 chdir 到临时工作区。
+	process.chdir(workDir);
 	return { workDir, sourcesDir, dbPath, sessionsDir };
 }
 
@@ -36,6 +40,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 5000): Promise<void
 }
 
 afterEach(() => {
+	process.chdir(originalCwd);
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -94,7 +99,6 @@ export const plugin = {
 		);
 
 		const { stop } = await runPusher({
-			sourcesDir,
 			dbPath,
 			sessionsDir,
 			lifecycle: "custom",
@@ -133,7 +137,6 @@ export const plugin = {
 		);
 		// default 生命周期会写入 tick_log:等待第一条出现。
 		const { stop } = await runPusher({
-			sourcesDir,
 			dbPath,
 			sessionsDir,
 			tick: { fallbackIntervalSeconds: 3600 },
@@ -165,9 +168,7 @@ export const plugin = {
 }`,
 			"utf-8",
 		);
-		await expect(runPusher({ sourcesDir, dbPath, sessionsDir, lifecycle: "nope" })).rejects.toThrow(
-			/lifecycle not found: nope/,
-		);
+		await expect(runPusher({ dbPath, sessionsDir, lifecycle: "nope" })).rejects.toThrow(/lifecycle not found: nope/);
 	});
 
 	it("rejects duplicate runtime providers instead of choosing the first", async () => {
@@ -192,7 +193,7 @@ export const plugin = {
 			"utf-8",
 		);
 
-		await expect(runPusher({ sourcesDir, dbPath, sessionsDir, lifecycle: "duplicate" })).rejects.toThrow(
+		await expect(runPusher({ dbPath, sessionsDir, lifecycle: "duplicate" })).rejects.toThrow(
 			/runtime factory duplicate duplicated/,
 		);
 	});

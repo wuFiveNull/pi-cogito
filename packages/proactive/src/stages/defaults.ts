@@ -139,6 +139,8 @@ export interface DefaultStagesConfig {
 		judgeSendThreshold?: number;
 		/** 主 agent 忙检查(akashic passive_busy_fn);返回 true 时本轮不判题。 */
 		busyFn?: (now: Date) => boolean;
+		/** 默认 busy 近窗(秒):presence.last_user_at 距今小于该值视为用户正在对话。默认 120。 */
+		busyWindowSeconds?: number;
 		/** anyaction 概率闸(akashic anyaction.py);enabled=false 时禁用。 */
 		anyaction?: {
 			enabled?: boolean;

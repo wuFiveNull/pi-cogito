@@ -4,6 +4,9 @@
 
 ### Added
 
+- Delivery now writes back to session history: `appendProactiveToSessionLog` appends a proactive assistant message to `<sessionsDir>/<sessionKey>.jsonl` (drift `fetch_messages`-compatible format) after a successful delivery via the default `createStandaloneSessionPort`; host-provided `runtimePorts.session` still overrides it.
+- Added a default busy port (`createStandaloneBusyPort`): presence `last_user_at` within `gate.busyWindowSeconds` (default 120s) blocks proactive ticks, approximating akashic's `processing_state.is_busy` in the three-process model.
+
 - Added host-facing runtime ports for authoritative sessions, presence, busy state, memory, outbound delivery, and source acknowledgements; standalone mode supplies a local adapter and durable ACK retry queue.
 - Added namespaced plugin source registration for duplicate local source IDs, concurrent Wake source fetch with partial-failure isolation, and persistent MCP connections with lifecycle cleanup.
 - Added default and Wake delivery orchestration with post-send session/presence/ACK side effects, plus monitor inspection for pending source ACK retries.
@@ -70,6 +73,9 @@
 - Wake 蓄水池批量 ingest 改为单事务(akashic `ingest_with_ids` 单 commit):事件与 `commit:false` 延后的隔离区一起原子落库;`consume`/`expire` rowcount 不匹配时回滚。
 - Wake 偏好召回(`recall_memory`)在提供嵌入时走向量精排 + relevance floor(limit 12,近似 akashic `relevance_floor="strong"`)。
 
+
+- Data source/plugin mount directory is now fixed to `<cwd>/.cogito/extensions/proactive` (the `sourcesDir` config key was removed; built-in package sources are used only as a fallback when the mount directory is empty).
+- Drift workspace default moved from `~/.cogito/agent/drift` to `<cwd>/.cogito/extensions/drift` (drift gate / staged deliveries / skills all live under the project mount now).
 ### Added
 
 - `collectRecent`/`isContextFrameContent`/`RECENT_CHAT_MESSAGE_MAX_CHARS`:近期会话收集 helper(akashic `Sensor.collect_recent` 移植),宿主端口与 judge 共用。

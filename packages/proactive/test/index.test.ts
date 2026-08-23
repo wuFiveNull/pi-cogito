@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadPusherConfig, runPusher } from "../src/index.ts";
 
 const tempDirs: string[] = [];
+const originalCwd = process.cwd();
 let workDir = "";
 let sourcesDir = "";
 let dbPath = "";
@@ -13,14 +14,17 @@ let sessionsDir = "";
 beforeEach(() => {
 	workDir = mkdtempSync(join(tmpdir(), "pusher-run-"));
 	tempDirs.push(workDir);
-	sourcesDir = join(workDir, "sources");
+	// 挂载目录唯一:临时 cwd 下的 .cogito/extensions/proactive。
+	sourcesDir = join(workDir, ".cogito", "extensions", "proactive");
 	dbPath = join(workDir, "proactive.sqlite");
 	sessionsDir = join(workDir, "sessions");
 	mkdirSync(sourcesDir, { recursive: true });
 	mkdirSync(sessionsDir, { recursive: true });
+	process.chdir(workDir);
 });
 
 afterEach(() => {
+	process.chdir(originalCwd);
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -133,7 +137,6 @@ describe("runPusher", () => {
 		);
 
 		const result = await runPusher({
-			sourcesDir,
 			dbPath,
 			sessionsDir,
 			replay: { eventsPath, clockPath, reportPath },
@@ -183,7 +186,6 @@ describe("runPusher", () => {
 		);
 
 		const { stop } = await runPusher({
-			sourcesDir,
 			dbPath,
 			sessionsDir,
 			tick: { fallbackIntervalSeconds: 3600 },
