@@ -26,7 +26,7 @@ Proactive 是常驻推送引擎:轮询数据源、判断候选是否值得打扰
   "sourcesDir": ".../sources",
   "dbPath": ".../proactive.sqlite",
   "sessionsDir": ".../sessions",
-  "drift": { "enabled": true, "driftDir": "~/.cogito/agent/drift", "minIntervalHours": 1, "gateTtlHours": 1 },
+  "drift": { "enabled": true, "driftDir": ".cogito/extensions/drift", "minIntervalHours": 1, "gateTtlHours": 1 },
   "tick": { "tickS0": 4800, "tickS1": 30, "tickJitter": 0.3, "scoreWeightEnergy": 0.35 },
   "delivery": { "enabled": true }
 }

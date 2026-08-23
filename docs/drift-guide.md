@@ -32,8 +32,8 @@ Drift 是一个**你写模型可以做什么、模型照着执行**的后台任�
 三进程 systemd 服务(`cogito-gateway` / `cogito-proactive` / `cogito-drift`),
 drift 的宿主是 `cogito-drift`:
 
-- 技能目录:`~/.cogito/agent/drift/skills/<skill-name>/SKILL.md`
-- 状态库:`~/.cogito/agent/drift/drift.db`(runs / skill_continuum / skill_journal /
+- 技能目录:`<project>/.cogito/extensions/drift/skills/<skill-name>/SKILL.md`
+- 状态库:`<project>/.cogito/extensions/drift/drift.db`(runs / skill_continuum / skill_journal /
   self_state / drift_observations / drift_active_runs)
 - 门控:proactive 空闲时向 `drift_gate` 写 `allowed` 许可(TTL 1h);drift 每轮读许可,
   `suppressed` 时跳过
@@ -84,7 +84,7 @@ Drift 会被反复触发。它既要保留当前意图,也要能从多轮行为�
 
 ## Drift Skill 格式
 
-每个 skill 是一个目录,放在 `~/.cogito/agent/drift/skills/<skill-name>/` 下,
+每个 skill 是一个目录,放在 `<project>/.cogito/extensions/drift/skills/<skill-name>/` 下,
 核心文件是 `SKILL.md`。
 
 ### 哪些文件你写、哪些 agent 写
@@ -212,5 +212,5 @@ description: 定期把最近对话里值得回顾的内容归档到工作文件,
 
 ```bash
 journalctl --user -u cogito-drift -f                 # [drift] enter 每 5 分钟一轮
-sqlite3 ~/.cogito/agent/drift/drift.db "select skill_name,status,message_result,briefing from runs order by finished_at desc limit 10"
+sqlite3 .cogito/extensions/drift/drift.db "select skill_name,status,message_result,briefing from runs order by finished_at desc limit 10"
 ```
