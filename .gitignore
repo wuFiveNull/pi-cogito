@@ -18,6 +18,12 @@ config.json
 
 # Runtime data
 .run/
+*.db-shm
+*.db-wal
+cogito-*.tar.gz
+
+# Python virtualenvs
+.venv/
 __pycache__/
 *.pyc
 *.sqlite
