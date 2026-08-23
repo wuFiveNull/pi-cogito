@@ -61,6 +61,13 @@ export interface GatewayConfigFile {
 			maxRecentRuns?: number;
 		};
 	};
+	/** 静默时段:非回复类主动推送(proactive/drift/定时/message_push)
+	 *  在 [start, end) 小时内积压,到 end 点后补发。start/end 为本地时区小时(0-23)。 */
+	quietHours?: {
+		enabled?: boolean;
+		start?: number;
+		end?: number;
+	};
 }
 
 const ENV_PREFIX = "GATEWAY_";

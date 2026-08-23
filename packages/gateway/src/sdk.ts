@@ -27,6 +27,7 @@ import {
 } from "./messages.ts";
 import type { OutboxCleanupOptions, OutboxRecord, OutboxStatus } from "./outbox.ts";
 import type { PairingStore } from "./pairing.ts";
+import { QuietPushGate } from "./quiet-push.ts";
 import { TurnScheduler, type TurnSchedulerOptions } from "./scheduler.ts";
 import { FileChannelSessionStore } from "./session.ts";
 import { FileChannelOffsetStore, FileInboundHandoffStore, type InboundDedupStore, inboundMessageKey } from "./state.ts";
@@ -115,6 +116,8 @@ export interface ChannelSdkOptions {
 	watchConfig?: boolean | GatewayConfigWatchOptions;
 	/** Per-session serialization and concurrency limits for inbound handlers. */
 	scheduler?: TurnSchedulerOptions;
+	/** 静默时段积压队列文件路径(config.quietHours 启用时用到)。 */
+	quietQueuePath?: string;
 }
 
 export type ChannelSdkConfigWatchOptions = GatewayConfigWatchOptions;
@@ -173,6 +176,7 @@ export class ChannelSdk {
 	private readonly maxDelayMs: number;
 	private readonly handlers = new Set<ChannelMessageHandler>();
 	private readonly scheduler: TurnScheduler;
+	private readonly quietGate: QuietPushGate | undefined;
 	private unsubscribeInbound: (() => void) | undefined;
 	private configWatcher: ReturnType<typeof watchGatewayConfig> | undefined;
 	private outboxCleanupTimer: NodeJS.Timeout | undefined;
@@ -213,6 +217,18 @@ export class ChannelSdk {
 		this.watchConfigSetting = options.watchConfig;
 		this.outboxCleanupSetting = options.outboxCleanup;
 		this.config = restrictChannels(config, this.selectedChannels);
+		const quietHours = this.config.quietHours;
+		this.quietGate =
+			quietHours?.enabled && options.quietQueuePath
+				? new QuietPushGate({
+						enabled: true,
+						start: quietHours.start,
+						end: quietHours.end,
+						queuePath: options.quietQueuePath,
+						deliver: (message) => this.deliverNow(message),
+						log: (message) => console.error(`[gateway] ${message}`),
+					})
+				: undefined;
 		this.receive = options.receive !== false;
 		this.maxAttempts = positiveInteger(options.retry?.maxAttempts, 3);
 		this.baseDelayMs = nonNegativeNumber(options.retry?.baseDelayMs, 1000);
@@ -269,6 +285,7 @@ export class ChannelSdk {
 		this.configWatcher = undefined;
 		if (this.outboxCleanupTimer) clearInterval(this.outboxCleanupTimer);
 		this.outboxCleanupTimer = undefined;
+		this.quietGate?.stop();
 		this.unsubscribeInbound?.();
 		this.unsubscribeInbound = undefined;
 		try {
@@ -293,6 +310,22 @@ export class ChannelSdk {
 	async send(message: OutboundMessage): Promise<ChannelSendReceipt> {
 		this.assertInitialized();
 		const outbound = withMessageId(message);
+		if (this.quietGate?.shouldSuppress(outbound)) {
+			this.quietGate.suppress(outbound);
+			const acceptedAt = Date.now();
+			const receipt: DeliveryReceipt = {
+				messageId: outbound.messageId!,
+				channel: outbound.channel,
+				chatId: outbound.chatId,
+				status: "success",
+				attempts: 1,
+				acceptedAt,
+				deliveredAt: acceptedAt,
+				detail: "queued during quiet hours",
+			};
+			this.bus.publishDelivery(receipt);
+			return receipt;
+		}
 		const channel = this.requireChannel(outbound.channel);
 		this.bus.recordOutbound(outbound);
 		const acceptedAt = Date.now();
@@ -314,6 +347,10 @@ export class ChannelSdk {
 			if (receipt.status === "success" || receipt.status === "partial") outbox?.markDelivered(receipt);
 			else outbox?.markFailed(receipt);
 			this.bus.publishDelivery(receipt);
+			// 非静默期的一次发送顺带补发积压队列。
+			void this.quietGate?.flush().catch((error) => {
+				console.error(`[gateway] quiet push flush failed: ${formatError(error)}`);
+			});
 			return receipt;
 		} catch (error) {
 			const receipt: DeliveryReceipt = {
@@ -329,6 +366,15 @@ export class ChannelSdk {
 			this.bus.publishDelivery(receipt);
 			throw error;
 		}
+	}
+
+	/** 静默补发的直接发送(不重入 send,避免递归;best-effort)。 */
+	private async deliverNow(message: OutboundMessage): Promise<void> {
+		const channel = this.requireChannel(message.channel);
+		await this.withRetry(
+			() => channel.send(message),
+			(attempt) => this.bus.markOutboundAttempt(message, attempt),
+		);
 	}
 
 	/** Deliver a streaming delta through the named channel with bounded retry. */

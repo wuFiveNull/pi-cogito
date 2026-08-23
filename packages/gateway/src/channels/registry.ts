@@ -41,6 +41,8 @@ export interface GatewayConfig {
 	agent?: Record<string, unknown>;
 	/** Preserved by the SDK for proactive integrations. */
 	proactive?: Record<string, unknown>;
+	/** 静默时段(主动推送积压补发),由 SDK 的 quiet-push 门读取。 */
+	quietHours?: { enabled?: boolean; start?: number; end?: number };
 }
 
 export interface ChannelRegistryOptions {

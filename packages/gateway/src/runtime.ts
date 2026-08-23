@@ -21,6 +21,14 @@ export interface ChannelAgentRuntimeOptions {
 	handleMessage: ChannelReplyHandler;
 	onError?: ChannelAgentErrorHandler;
 	interruptController?: ChannelInterruptControllerLike;
+	/**
+	 * Turn-boundary merging, enabled when > 0 (the value is a boolean switch):
+	 * the first message of a burst is processed immediately; messages that
+	 * arrive while a turn is in flight are queued and merged into ONE turn as
+	 * soon as the current turn finishes (before the second message would start
+	 * on its own). 0 disables merging (each message gets its own turn).
+	 */
+	mergeWindowMs?: number;
 }
 
 export class ChannelAgentRuntime {
@@ -28,7 +36,11 @@ export class ChannelAgentRuntime {
 	private readonly handleMessage: ChannelReplyHandler;
 	private readonly onError: ChannelAgentErrorHandler | undefined;
 	private readonly interruptController: ChannelInterruptControllerLike;
+	private readonly mergeEnabled: boolean;
 	private readonly pending = new Map<string, Promise<void>>();
+	/** Per-session backlog of messages waiting behind the active turn. */
+	private readonly sessionQueues = new Map<string, InboundMessage[]>();
+	private readonly sessionBusy = new Set<string>();
 	private readonly activeControllers = new Set<AbortController>();
 	private unsubscribe: (() => void) | undefined;
 	private started = false;
@@ -38,6 +50,7 @@ export class ChannelAgentRuntime {
 		this.handleMessage = options.handleMessage;
 		this.onError = options.onError;
 		this.interruptController = options.interruptController ?? options.sdk.interruptController;
+		this.mergeEnabled = (options.mergeWindowMs ?? 0) > 0;
 	}
 
 	async start(): Promise<void> {
@@ -62,6 +75,8 @@ export class ChannelAgentRuntime {
 		this.unsubscribe = undefined;
 		for (const controller of this.activeControllers) controller.abort("channel runtime stopping");
 		await this.sdk.stop();
+		this.sessionQueues.clear();
+		this.sessionBusy.clear();
 		const pending = [...this.pending.values()];
 		await Promise.allSettled(pending);
 		this.pending.clear();
@@ -72,6 +87,46 @@ export class ChannelAgentRuntime {
 	}
 
 	private enqueue(message: InboundMessage): Promise<void> {
+		if (!this.mergeEnabled) return this.enqueueDirect(message);
+		const sessionKey = message.sessionKey;
+		const queue = this.sessionQueues.get(sessionKey) ?? [];
+		queue.push(message);
+		this.sessionQueues.set(sessionKey, queue);
+		if (!this.sessionBusy.has(sessionKey)) {
+			this.sessionBusy.add(sessionKey);
+			void this.drain(sessionKey);
+		}
+		return Promise.resolve();
+	}
+
+	/**
+	 * Process a session's backlog turn by turn. The first message of a burst
+	 * starts immediately; once the active turn finishes, everything that piled
+	 * up behind it is merged into a single turn (so the second message never
+	 * starts on its own while more are queued).
+	 */
+	private async drain(sessionKey: string): Promise<void> {
+		try {
+			while (true) {
+				const queue = this.sessionQueues.get(sessionKey);
+				if (!queue || queue.length === 0) break;
+				const batch = queue.splice(0, queue.length);
+				await this.process(mergeMessages(batch)).catch(() => undefined);
+			}
+		} finally {
+			this.sessionBusy.delete(sessionKey);
+			const queue = this.sessionQueues.get(sessionKey);
+			if (queue && queue.length > 0) {
+				// Messages raced in while the busy flag was being torn down.
+				this.sessionBusy.add(sessionKey);
+				void this.drain(sessionKey);
+			} else {
+				this.sessionQueues.delete(sessionKey);
+			}
+		}
+	}
+
+	private enqueueDirect(message: InboundMessage): Promise<void> {
 		const previous = this.pending.get(message.sessionKey) ?? Promise.resolve();
 		const current = previous.catch(() => undefined).then(() => this.process(message));
 		this.pending.set(message.sessionKey, current);
@@ -182,6 +237,23 @@ function toOutboundMessage(message: InboundMessage, content: string, turnId: str
 		replyTo: message.messageId,
 		replyContext: message.replyTo,
 		turnId,
+	};
+}
+
+/**
+ * Combine a merge-batch of messages into one synthetic message. A single
+ * message passes through unchanged; multiples are numbered into one content
+ * block with images (if any) appended, so the agent answers them as a whole.
+ */
+function mergeMessages(messages: InboundMessage[]): InboundMessage {
+	const first = messages[0];
+	if (messages.length === 1) return first;
+	const numbered = messages.map((message, index) => `${index + 1}. ${message.content}`).join("\n");
+	const images = messages.flatMap((message) => message.images ?? []);
+	return {
+		...first,
+		content: numbered,
+		...(images.length > 0 ? { images } : {}),
 	};
 }
 
