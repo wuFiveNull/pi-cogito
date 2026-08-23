@@ -66,3 +66,39 @@ await module.stop();
 - `extensionsDir` 里的 TS 扩展可用 `registerTool` / `on("context")` 等全部扩展 API。
 - 流式增量需要通道自身开启流式能力(web 通道:`channels.web.streaming: true`),
   `chat.streaming` 控制是否转发增量,缺省开启。
+
+### 上下文与记忆增强(akashic 移植,全部默认开启、失败不影响回复)
+
+```json
+{
+  "chat": {
+    "memory": {
+      "enabled": true,
+      "injectProfile": true,
+      "historyRoute": true
+    },
+    "context": {
+      "budget": {
+        "enabled": true,
+        "hardPercent": 0.95,
+        "keepRecentMessages": 40,
+        "essentialTools": ["message_push", "web_fetch", "web_search", "memorize", "recall_memory"]
+      }
+    }
+  }
+}
+```
+
+- `memory.historyRoute`(默认 true):每轮用轻模型判断是否检索向量记忆
+  (RETRIEVE/NO_RETRIEVE);命中 skip 时跳过检索但稳定档案(SELF/MEMORY/
+  RECENT_CONTEXT)照常注入。决策按会话+查询缓存 10 分钟,LLM 失败自动回退为检索。
+- 记忆注入块为富渲染:相对时间、证据可回源、procedure 步骤/触发词、低置信标注;
+  `memorize`/`forget_memory` 写入后同一会话下一轮立即生效(缓存失效),无需等
+  consolidation 轮询。
+- 每轮对话结束后异步提取过程规则(procedure 记忆 + trigger_tags,按会话限流
+  10 分钟);命中规则的工具调用返回规则文本(否定规则直接拦截,正向规则提示
+  调整顺序)。仅覆盖 chat 注册工具,host 默认工具只记观察日志。
+- `context.budget`(默认开启):上下文占用 ≥ `hardPercent` 时从最旧起成轮删除
+  消息(保留最近 `keepRecentMessages` 条,不动最后一条 user);provider 请求
+  仍超限时按 `essentialTools` 裁剪工具 schema(仅 OpenAI 兼容 payload)。
+  裁剪后仍超限交 host 自动压缩兜底。

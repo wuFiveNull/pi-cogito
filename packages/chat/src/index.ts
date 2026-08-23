@@ -10,10 +10,12 @@
  * - wires long-term memory injection, timed tasks, and the web dashboard.
  */
 
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { StreamFn, ThinkingLevel } from "@cogito/agent-core";
 import type { Model } from "@cogito/ai";
 import {
+	buildSessionKey,
 	ChannelAgentRuntime,
 	type ChannelSdk,
 	createChannelSdk,
@@ -22,6 +24,7 @@ import {
 	FileOutboundOutbox,
 	GatewayInstanceLock,
 	loadGatewayConfig,
+	type OutboundMessage,
 	writeGatewayReadiness,
 } from "@cogito/gateway";
 import {
@@ -29,6 +32,9 @@ import {
 	ExtensionSqlite,
 	getAgentDir,
 	ModelRuntime,
+	type PostResponseLlm,
+	PostResponseMemoryWorker,
+	SessionManager,
 	SettingsManager,
 	type SubagentRunner,
 	type ToolDefinition,
@@ -37,6 +43,8 @@ import { CHAT_SCHEDULE_TOOLS, type ChatConfig, loadChatConfig } from "./config.t
 import { mountWebDashboard, resolveProactiveDbPath } from "./dashboard.ts";
 import { ChatDelivery } from "./delivery.ts";
 import { createChatResourceLoader } from "./extensions.ts";
+import { HistoryRouteGate } from "./memory/history-route.ts";
+import { ProcedureTagger } from "./memory/procedure-tagger.ts";
 import { ChatMemory } from "./memory.ts";
 import { ChatPresenceWriter } from "./presence.ts";
 import { ChatScheduler } from "./scheduler.ts";
@@ -47,7 +55,7 @@ import { createMessageHistoryTools } from "./tools/messages.ts";
 import { createScheduleTools } from "./tools/schedule.ts";
 import { createLoadSkillTool } from "./tools/skills.ts";
 import { createWebTools } from "./tools/web.ts";
-import { createChatMessageHandler, promptSession } from "./turn.ts";
+import { createChatMessageHandler, extractToolChain, FALLBACK_EMPTY_REPLY, promptSession } from "./turn.ts";
 
 export type { ChatConfig } from "./config.ts";
 export { mountWebDashboard, resolveProactiveDbPath } from "./dashboard.ts";
@@ -115,6 +123,7 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 	let scheduler: ChatScheduler | undefined;
 	let memory: ChatMemory | undefined;
 	let presenceWriter: ChatPresenceWriter | undefined;
+	let postResponseWorker: PostResponseMemoryWorker | undefined;
 	const extensionSqlite = ExtensionSqlite.create(agentDir, () => "cogito-gateway");
 
 	try {
@@ -132,9 +141,46 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 			inboundHandoffStatePath: join(agentDir, "channel-inbound.json"),
 			inboundDeadLetterStatePath: join(agentDir, "channel-inbound-dlq.json"),
 			messageStatePath: join(agentDir, "channel-messages.json"),
+			quietQueuePath: join(agentDir, "quiet-push-queue.json"),
 			context: { attachmentStore: new FileAttachmentStore(join(agentDir, "channel-attachments")) },
 		});
 		sdk = channelSdk;
+
+		// 推送写回:非 turn 的出站投递(proactive/drift/schedule 推送)成功后,
+		// 把内容追加进目标会话上下文,让 agent 记得自己推过什么。
+		// turn 回复(带 turnId/event)本身已写入会话,跳过避免重复。
+		const unsubscribePushRecording = channelSdk.onDelivery((receipt) => {
+			if (receipt.status !== "success") return;
+			try {
+				const records =
+					channelSdk.listMessages({
+						channel: receipt.channel,
+						chatId: receipt.chatId,
+						direction: "outbound",
+						limit: 20,
+					}) ?? [];
+				const record = records.find(
+					(candidate) => candidate.direction === "outbound" && candidate.message?.messageId === receipt.messageId,
+				);
+				const outbound = record?.message as OutboundMessage | undefined;
+				if (!outbound || outbound.turnId || outbound.event || outbound.thinking) return;
+				const content = (outbound.content ?? "").trim();
+				if (!content) return;
+				const persisted = channelSessionStore.getSession(buildSessionKey(receipt.channel, receipt.chatId));
+				if (!persisted?.agentSessionFile || !existsSync(persisted.agentSessionFile)) return;
+				const sessionManager = SessionManager.open(persisted.agentSessionFile, agentSessionDir, projectDir);
+				sessionManager.appendMessage({
+					role: "custom",
+					customType: "proactive_push",
+					content: [{ type: "text", text: content }],
+					display: true,
+					details: { channel: receipt.channel, chatId: receipt.chatId },
+					timestamp: Date.now(),
+				});
+			} catch (error) {
+				log(`push session record failed: ${formatError(error)}`);
+			}
+		});
 
 		const delivery = new ChatDelivery(channelSdk);
 		// 用户活跃度心跳:写 proactive 的 presence 表(energy 调度输入)。
@@ -168,7 +214,9 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 					chatId: job.targetChatId,
 				});
 				if (!session.isIdle) return "";
-				return promptSession(session, `定时任务内容生成请求：${job.prompt}`);
+				const content = await promptSession(session, `定时任务内容生成请求：${job.prompt}`);
+				// 会话空跑时的兜底文案不是可投递内容,丢弃(静默跳过本轮)。
+				return content === FALLBACK_EMPTY_REPLY ? "" : content;
 			},
 			log,
 		});
@@ -178,6 +226,30 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 			modelsPath: join(agentDir, "models.json"),
 		});
 		const model = resolveChatModel(chatConfig, modelRuntime);
+		// 回复后记忆失效:用户明确否定旧行为时自动 supersede 旧 procedure/preference。
+		postResponseWorker =
+			memory && model
+				? new PostResponseMemoryWorker({
+						memorizer: memory.engine.memorizer,
+						retriever: memory.engine.retriever,
+						llm: createPostResponseLlm(modelRuntime, model),
+						log,
+					})
+				: undefined;
+		// 历史路由:轻模型判断每轮是否需要向量检索(akashic RETRIEVE/NO_RETRIEVE)。
+		const historyRoute =
+			memory && model && chatConfig.memory?.historyRoute !== false
+				? new HistoryRouteGate({ llm: createPostResponseLlm(modelRuntime, model), log })
+				: undefined;
+		// 过程记忆标注:afterTurn 异步提取流程规则,写 trigger_tags 供工具拦截。
+		const procedureTagger =
+			memory && model
+				? new ProcedureTagger({
+						llm: createPostResponseLlm(modelRuntime, model),
+						memory,
+						log,
+					})
+				: undefined;
 		const settingsManager = SettingsManager.create(projectDir, agentDir);
 		// Sub-agent delegation: one shared runner (model/credentials follow the
 		// main sessions), one per-session SubagentManager mounted as an
@@ -229,9 +301,12 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 						},
 						scope,
 					),
+					contextBudget: chatConfig.context?.budget,
+					historyRoute,
 					extensionsDir: chatConfig.extensionsDir,
 					persona: chatConfig.persona,
 					subagentRunner,
+					log,
 				}),
 			maxSessions: chatConfig.sessions?.maxSessions,
 			maxIdleMinutes: chatConfig.sessions?.maxIdleMinutes,
@@ -244,6 +319,20 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 			delivery,
 			streaming: chatConfig.streaming !== false,
 			onUserMessage: (message) => writer.recordUserMessage(message.timestamp, "local"),
+			afterTurn: (info) => {
+				// 回复后记忆失效:用户明确否定旧行为时自动 supersede 旧 procedure/preference。
+				if (postResponseWorker) {
+					void postResponseWorker.run({
+						userMessage: info.userMessage,
+						toolChain: extractToolChain(info.messages),
+						sourceRef: `chat:${info.scope.channel}:${info.scope.chatId}@post_response`,
+					});
+				}
+				// 过程记忆标注:提取流程规则写 trigger_tags(限流 + fail-open)。
+				if (procedureTagger) {
+					void procedureTagger.run(info.userMessage, turnText(info.messages), info.scope);
+				}
+			},
 			log,
 		});
 		runtime = new ChannelAgentRuntime({
@@ -252,6 +341,7 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 			onError: (message, error) => {
 				log(`delivery failed channel=${message.channel} chat=${message.chatId}: ${formatError(error)}`);
 			},
+			mergeWindowMs: chatConfig.mergeWindowMs ?? 0,
 		});
 		await runtime.start();
 
@@ -290,6 +380,7 @@ export async function runChatModule(options: ChatModuleOptions = {}): Promise<Ch
 			readinessPath,
 			stop: async () => {
 				clearInterval(readinessMonitor);
+				unsubscribePushRecording();
 				await runtime?.stop().catch(() => undefined);
 				scheduler?.stop();
 				pool?.disposeAll();
@@ -338,6 +429,7 @@ function buildChatTools(deps: ChatToolBuildDeps, scope: ChatSessionScope): ToolD
 			timeoutMs: deps.web?.fetch?.timeoutMs,
 			searchUrl: deps.web?.search?.url,
 			searchApiKey: deps.web?.search?.apiKey,
+			policy: deps.web?.allowPrivateNetwork ? { allowPrivateNetwork: true } : undefined,
 		}),
 	);
 	tools.push(...createMessageHistoryTools(deps.sdk));
@@ -386,8 +478,57 @@ function resolveChatModel(chatConfig: ChatConfig, modelRuntime: ModelRuntime): M
 	return provider ? modelRuntime.getModel(provider, reference) : undefined;
 }
 
+/** PostResponseLlm adapter over the shared ModelRuntime(轻模型复用主会话模型)。 */
+function createPostResponseLlm(modelRuntime: ModelRuntime, model: Model<any>): PostResponseLlm {
+	return {
+		chat: async (system, user, maxTokens) => {
+			const response = await modelRuntime.completeSimple(
+				model,
+				{
+					systemPrompt: system,
+					messages: [{ role: "user", content: user, timestamp: Date.now() }],
+					tools: [],
+				},
+				{ maxTokens },
+			);
+			const parts = Array.isArray(response.content) ? response.content : [];
+			const text = parts
+				.map((part) =>
+					typeof part === "object" && part !== null && part.type === "text"
+						? ((part as { text?: string }).text ?? "")
+						: "",
+				)
+				.join("")
+				.trim();
+			if (!text) throw new Error("post-response llm empty response");
+			return text;
+		},
+	};
+}
+
 function toolExcluded(name: string, chatConfig: ChatConfig): boolean {
 	return chatConfig.tools?.excluded?.includes(name) ?? false;
+}
+
+/** 回合文本摘要:assistant 文本拼接(供过程标注使用)。 */
+function turnText(messages: readonly { role?: string; content?: unknown }[]): string {
+	const parts: string[] = [];
+	for (const message of messages) {
+		if (message.role !== "assistant") continue;
+		const content = message.content;
+		if (!Array.isArray(content)) continue;
+		for (const part of content) {
+			if (
+				typeof part === "object" &&
+				part !== null &&
+				(part as { type?: string }).type === "text" &&
+				typeof (part as { text?: unknown }).text === "string"
+			) {
+				parts.push((part as { text: string }).text);
+			}
+		}
+	}
+	return parts.join("\n").slice(0, 4000);
 }
 
 function assertManagedWebConfig(

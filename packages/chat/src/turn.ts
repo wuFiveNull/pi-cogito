@@ -6,11 +6,20 @@
  * and return the outbound reply. Optional streaming forwards deltas first.
  */
 
+import type { AgentMessage } from "@cogito/agent-core";
 import type { ImageContent } from "@cogito/ai";
 import type { ChannelReplyHandler, InboundMessage } from "@cogito/gateway";
+import type { ToolChainCall } from "@cogito/host";
 import type { ChatDelivery } from "./delivery.ts";
 import type { AgentSession, ChatSessionPool } from "./session-pool.ts";
 import { forwardStreamDeltas } from "./streaming.ts";
+
+/** 一轮对话结束后的异步信息(post-response 记忆失效等)。 */
+export interface AfterTurnInfo {
+	userMessage: string;
+	messages: AgentMessage[];
+	scope: { channel: string; chatId: string };
+}
 
 export interface ChatTurnOptions {
 	pool: ChatSessionPool;
@@ -19,6 +28,8 @@ export interface ChatTurnOptions {
 	streaming?: boolean;
 	/** Inbound user-message hook (presence heartbeat, analytics, ...). */
 	onUserMessage?: (message: InboundMessage) => void;
+	/** 轮结束后异步回调(不阻塞回复;失败由调用方自行消化)。 */
+	afterTurn?: (info: AfterTurnInfo) => void | Promise<void>;
 	log?: (message: string) => void;
 }
 
@@ -44,7 +55,10 @@ export function createChatMessageHandler(options: ChatTurnOptions): ChannelReply
 					})
 				: undefined;
 			try {
-				const content = await promptSession(session, message.content, images, signal);
+				const content = await promptSession(session, message.content, images, signal, {
+					afterTurn: options.afterTurn,
+					scope: { channel: message.channel, chatId: message.chatId },
+				});
 				options.log?.(`replied channel=${message.channel} chat=${message.chatId} chars=${content.length}`);
 				return {
 					channel: message.channel,
@@ -69,6 +83,9 @@ export function createChatMessageHandler(options: ChatTurnOptions): ChannelReply
 	};
 }
 
+/** 会话空跑/超时无文本输出时的兜底回复。 */
+export const FALLBACK_EMPTY_REPLY = "我暂时没有生成可发送的回复。";
+
 /**
  * Run one prompt on a session and resolve the final assistant text.
  * Used by the turn handler and the scheduler's soft-tier generation.
@@ -78,6 +95,7 @@ export function promptSession(
 	text: string,
 	images?: ImageContent[],
 	signal?: AbortSignal,
+	options?: { afterTurn?: (info: AfterTurnInfo) => void | Promise<void>; scope?: { channel: string; chatId: string } },
 ): Promise<string> {
 	return new Promise((resolveReply, rejectReply) => {
 		let settled = false;
@@ -98,7 +116,15 @@ export function promptSession(
 		unsubscribe = session.subscribe((event) => {
 			if (event.type !== "agent_end" || event.willRetry) return;
 			const assistant = [...event.messages].reverse().find((message) => isAssistantMessage(message));
-			finish(() => resolveReply(extractText(assistant) || "我暂时没有生成可发送的回复。"));
+			finish(() => resolveReply(extractText(assistant) || FALLBACK_EMPTY_REPLY));
+			// 轮结束后的异步增强(记忆失效等):fire-and-forget,不阻塞回复。
+			if (options?.afterTurn) {
+				void options.afterTurn({
+					userMessage: text,
+					messages: event.messages,
+					scope: options.scope ?? { channel: "", chatId: "" },
+				});
+			}
 		});
 		if (signal?.aborted) {
 			abortPrompt();
@@ -108,11 +134,41 @@ export function promptSession(
 
 		void session.prompt(text, { source: "interactive", ...(images ? { images } : {}) }).then(
 			() => {
-				if (!settled) finish(() => resolveReply("我暂时没有生成可发送的回复。"));
+				if (!settled) finish(() => resolveReply(FALLBACK_EMPTY_REPLY));
 			},
 			(error: unknown) => finish(() => rejectReply(error)),
 		);
 	});
+}
+
+/**
+ * 从一轮对话的消息中提取工具链(memorize 调用 + 结果),供 post-response 记忆失效使用。
+ */
+export function extractToolChain(messages: readonly AgentMessage[]): ToolChainCall[] {
+	const resultsByCallId = new Map<string, unknown>();
+	for (const message of messages) {
+		if (message.role !== "toolResult") continue;
+		const text = toolResultText(message.content);
+		resultsByCallId.set(message.toolCallId, text);
+	}
+	const calls: ToolChainCall[] = [];
+	for (const message of messages) {
+		if (message.role !== "assistant") continue;
+		for (const part of message.content) {
+			if (part.type !== "toolCall") continue;
+			calls.push({ name: part.name, result: resultsByCallId.get(part.id) });
+		}
+	}
+	return calls;
+}
+
+function toolResultText(content: readonly unknown[]): string {
+	// ToolResultMessage.content 是 TextContent|ImageContent[]。
+	return (Array.isArray(content) ? content : [])
+		.filter((part): part is { type: string; text?: string } => typeof part === "object" && part !== null)
+		.map((part) => (part.type === "text" ? (part.text ?? "") : ""))
+		.join(" ")
+		.trim();
 }
 
 function toAgentImages(message: InboundMessage): ImageContent[] | undefined {

@@ -35,6 +35,8 @@ export interface ChatWebConfig {
 	enabled?: boolean;
 	fetch?: ChatWebFetchConfig;
 	search?: ChatWebSearchConfig;
+	/** Permit private/loopback web destinations (e.g. a local SearXNG). Default false. */
+	allowPrivateNetwork?: boolean;
 }
 
 export interface ChatMemoryConfig {
@@ -44,6 +46,8 @@ export interface ChatMemoryConfig {
 	dbPath?: string;
 	/** Inject the stable memory files (SELF/MEMORY/RECENT_CONTEXT) each turn. Default true. */
 	injectProfile?: boolean;
+	/** 历史路由门控(RETRIEVE/NO_RETRIEVE,轻模型判断是否检索)。默认 true。 */
+	historyRoute?: boolean;
 }
 
 export interface ChatSessionsConfig {
@@ -61,6 +65,22 @@ export interface ChatScheduleConfig {
 	enabled?: boolean;
 }
 
+export interface ChatContextBudgetConfig {
+	/** 预算闸门总开关。默认 true。 */
+	enabled?: boolean;
+	/** 超限阈值(占上下文窗口比例)。默认 0.95。 */
+	hardPercent?: number;
+	/** 消息裁剪后保留的最近条数。默认 40。 */
+	keepRecentMessages?: number;
+	/** 工具裁剪的保留集(工具名)。默认 CHAT_DEFAULT_TOOLS。 */
+	essentialTools?: string[];
+}
+
+export interface ChatContextConfig {
+	/** 上下文预算闸门:超限时裁消息/裁工具(akashic ContextTrimPlan 等价)。 */
+	budget?: ChatContextBudgetConfig;
+}
+
 export interface ChatConfig {
 	/** Model reference (provider/id pattern) for chat sessions. */
 	model?: string;
@@ -75,6 +95,10 @@ export interface ChatConfig {
 	web?: ChatWebConfig;
 	sessions?: ChatSessionsConfig;
 	schedule?: ChatScheduleConfig;
+	/** Merge backlog: when > 0, messages arriving while a turn is in flight are
+	 *  merged into one reply after the current turn finishes. 0 disables merging. */
+	mergeWindowMs?: number;
+	context?: ChatContextConfig;
 	/** Chat extension directory (absolute, or relative to the agent dir). */
 	extensionsDir?: string;
 	/** Persona text appended to the system prompt (akashic VEDA equivalent). */
@@ -99,6 +123,7 @@ export const CHAT_SCHEDULE_TOOLS = ["schedule", "list_schedules", "cancel_schedu
 
 export const CHAT_DEFAULT_MAX_IDLE_MINUTES = 30;
 export const CHAT_DEFAULT_MAX_SESSIONS = 50;
+export const CHAT_DEFAULT_KEEP_RECENT_MESSAGES = 40;
 
 export function loadChatConfig(configPath: string): ChatConfig {
 	let raw: unknown;
@@ -121,11 +146,13 @@ export function loadChatConfig(configPath: string): ChatConfig {
 					enabled: optionalBoolean(chat.memory.enabled, true),
 					dbPath: optionalString(chat.memory.dbPath),
 					injectProfile: optionalBoolean(chat.memory.injectProfile, true),
+					historyRoute: optionalBoolean(chat.memory.historyRoute, true),
 				}
-			: { enabled: true, injectProfile: true },
+			: { enabled: true, injectProfile: true, historyRoute: true },
 		web: isRecord(chat.web)
 			? {
 					enabled: optionalBoolean(chat.web.enabled, true),
+					allowPrivateNetwork: optionalBoolean(chat.web.allowPrivateNetwork, false),
 					fetch: isRecord(chat.web.fetch)
 						? {
 								maxChars: optionalNumber(chat.web.fetch.maxChars),
@@ -137,7 +164,7 @@ export function loadChatConfig(configPath: string): ChatConfig {
 						? { url: optionalString(chat.web.search.url), apiKey: optionalString(chat.web.search.apiKey) }
 						: undefined,
 				}
-			: { enabled: true },
+			: { enabled: true, allowPrivateNetwork: false },
 		sessions: isRecord(chat.sessions)
 			? {
 					maxIdleMinutes: optionalNumber(chat.sessions.maxIdleMinutes, CHAT_DEFAULT_MAX_IDLE_MINUTES),
@@ -147,6 +174,22 @@ export function loadChatConfig(configPath: string): ChatConfig {
 		schedule: isRecord(chat.schedule)
 			? { enabled: optionalBoolean(chat.schedule.enabled, false) }
 			: { enabled: false },
+		mergeWindowMs: optionalNumber(chat.mergeWindowMs, 0),
+		context: isRecord(chat.context)
+			? {
+					budget: isRecord(chat.context.budget)
+						? {
+								enabled: optionalBoolean(chat.context.budget.enabled, true),
+								hardPercent: optionalFraction(chat.context.budget.hardPercent, 0.95),
+								keepRecentMessages: optionalNumber(
+									chat.context.budget.keepRecentMessages,
+									CHAT_DEFAULT_KEEP_RECENT_MESSAGES,
+								),
+								essentialTools: optionalStringArray(chat.context.budget.essentialTools),
+							}
+						: undefined,
+				}
+			: undefined,
 		extensionsDir: optionalString(chat.extensionsDir),
 		persona: optionalString(chat.persona),
 	};
@@ -167,6 +210,12 @@ function optionalBoolean(value: unknown, fallback: boolean): boolean {
 function optionalNumber(value: unknown, fallback?: number): number | undefined {
 	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return fallback;
 	return Math.floor(value);
+}
+
+/** 小数配置(如 hardPercent=0.95):不做取整。 */
+function optionalFraction(value: unknown, fallback: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value >= 1) return fallback;
+	return value;
 }
 
 function optionalStringArray(value: unknown): string[] | undefined {

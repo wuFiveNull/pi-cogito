@@ -28,7 +28,8 @@ export function mountWebDashboard(sdk: ChannelSdk, options: ChatDashboardOptions
 		sessionsDir: join(options.agentDir, "sessions"),
 		proactiveDbPath: resolveProactiveDbPath(options.projectDir, options.agentDir),
 		memoryDbPath: join(options.agentDir, "memory", "memory.sqlite"),
-		driftSkillsDir: join(options.agentDir, "drift", "skills"),
+		// drift 挂载目录统一在项目 .cogito/extensions/drift 下。
+		driftSkillsDir: join(options.projectDir, ".cogito", "extensions", "drift", "skills"),
 		mcpConfigPath: join(options.agentDir, "mcp.json"),
 		settingsPath: join(options.agentDir, "web-settings.json"),
 	});
