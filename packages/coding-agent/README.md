@@ -1,3 +1,6 @@
+> **归档状态**：本包已冻结，**请勿修改、请勿使用**（保留为参考代码，不参与构建/发布）。
+> 详见 [ARCHIVED.md](./ARCHIVED.md)。
+
 <p align="center">
   <a href="https://pi.dev">
     <img alt="pi logo" src="https://pi.dev/logo-auto.svg" width="128">

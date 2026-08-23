@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Removed
+
+- Removed the four CLI test files that referenced the never-ported `src/cli.ts` entry (`session-file-invalid`, `session-id-readonly`, `startup-session-name`, `stdout-cleanliness`); cogito host has no CLI (fork leftover from pi).
+
+### Changed
+
+- Memory engine now opens the SQLite database with `allowExtension: true`, so the sqlite-vec extension actually loads and `vec_items` ANN search is enabled (previously `loadExtension` threw "extension loading is not allowed" and the vector lane silently fell back to a full scan; matches the storage-sqlite-node session indexer).
+
 ### Breaking Changes
 
 - `ModelRegistry.getApiKeyAndHeaders()` now returns `ProviderHeaders` with `string | null` values and preserves `null` header-deletion markers. Extensions that inspect returned headers must handle `null`; extensions forwarding them to pi-ai streams should pass them through unchanged. This prevents placeholder OpenAI credentials from being sent through Cloudflare AI Gateway ([#7030](https://github.com/earendil-works/pi/issues/7030)).
@@ -24,6 +32,10 @@
 
 ### Fixed
 
+- Added undo-by-source for memory (`MemoryStore.undoByMessageSources` / `restoreReplacementsForUndo` / `listReplacements`, akashic `_undo_store_by_message_sources` port): items whose `source_ref` matches message ids are superseded and their replaced predecessors restored (unless still referenced by an active replacement); `markSupersededBatch` now records the replacing item (`ReplacementNewItem`) so the audit chain is navigable both ways.
+- Added trigger-tag keyword interception (akashic procedure_tagger/`keyword_match_procedures`): procedures persist inferred `trigger_tags` (CJK bigrams + ascii tokens, explicit tags preserved, `inferTriggerTags`/`parseTriggerTags`), and keyword retrieval scores `extra_json` hits at half weight so trigger tags surface procedures without summary text matches.
+- Memory engine factories are now pluggable: `registerMemoryEngineFactory(name, factory)` / `listMemoryEngineFactories()` with `MemoryEngineOptions.engine` selection (akashic `[memory].engine` port); unknown names fall back to the default engine.
+- Added the post-response memory worker (`PostResponseMemoryWorker` in `core/memory/post-response-worker.ts`, akashic `memory2/post_response_worker.py` port): after each turn it detects explicit user rejections of agent behavior ("错了/不要再/废弃…"), retrieves related `procedure`/`preference` items above the 0.82 similarity threshold, lets a light LLM decide which to retire, and supersedes them — while protecting ids written by `memorize` in the same turn. Chat wires it on `agent_end` via the new `afterTurn` hook (`extractToolChain` exported from `@cogito/chat`).
 - Fixed keyword memory search binding `scope`/`memoryType` conditions to the OR-match placeholders, which made scoped keyword retrieval (`requireScopeMatch`) always return empty ([#7443](https://github.com/earendil-works/pi/issues/7443)).
 - Fixed bare exact `--model` IDs shared by multiple providers choosing the first catalog entry instead of the sole authenticated provider or a clear ambiguity error ([#7327](https://github.com/earendil-works/pi/issues/7327)).
 - Fixed standalone x64 binaries requiring Haswell-era AVX2/BMI2 instructions by compiling release executables against Bun's baseline runtime ([#7149](https://github.com/earendil-works/pi/issues/7149)).
