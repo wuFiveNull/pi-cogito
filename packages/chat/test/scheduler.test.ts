@@ -195,6 +195,44 @@ describe("ChatScheduler firing", () => {
 		expect(job.enabled).toBe(true);
 	});
 
+	it("re-anchors daily every jobs to the fixed time after a late fire", async () => {
+		// 模拟"每天 09:00"任务在网关恢复后才补触发(如当晚 21 点):
+		// 下次触发必须回到明天的 09:00,而不是"补触发时刻 +24h"。
+		const jobsPath = tempJobsPath();
+		const delivered: string[] = [];
+		const todayAtNine = new Date();
+		todayAtNine.setHours(9, 0, 0, 0);
+		const dueJob = {
+			id: "daily-1",
+			sessionKey: "qq:user:2908173675",
+			tier: "instant",
+			trigger: "every",
+			when: "09:00",
+			prompt: "到点内容",
+			targetChannel: "qq",
+			targetChatId: "user:2908173675",
+			nextFireAt: new Date(todayAtNine.getTime() - 86_400_000).toISOString(),
+			intervalMs: 86_400_000,
+			enabled: true,
+			createdAt: new Date().toISOString(),
+			fireCount: 0,
+		};
+		writeFileSync(jobsPath, JSON.stringify([dueJob]), "utf-8");
+		const scheduler = createScheduler(jobsPath, delivered);
+		scheduler.start();
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		scheduler.stop();
+		expect(delivered).toEqual(["到点内容"]);
+		const job = scheduler.list()[0];
+		expect(job.fireCount).toBe(1);
+		expect(job.enabled).toBe(true);
+		const expectedAtNine = new Date();
+		expectedAtNine.setHours(9, 0, 0, 0);
+		const expected =
+			expectedAtNine.getTime() > Date.now() ? expectedAtNine.getTime() : expectedAtNine.getTime() + 86_400_000;
+		expect(Date.parse(job.nextFireAt)).toBe(expected);
+	});
+
 	it("persists jobs across restarts", async () => {
 		const jobsPath = tempJobsPath();
 		const first = createScheduler(jobsPath);

@@ -44,3 +44,10 @@
     (只取 Compression/Ongoing Threads,裁掉 Recent Turns)→ 向量召回块的顺序注入
     稳定档案(akashic prompt-block 优先级移植),文件缺失时跳过该段;新增
     `chat.memory.injectProfile` 开关(默认 true)控制稳定档案注入。
+
+### Fixed
+
+- `message_push` 不再强制要求 `target_channel`/`target_chat_id`:省略时回落到当前会话
+  所在渠道(per-session scope),避免推送到未指定的目标。
+- 每日 `every` 定时任务(如 `09:00`)补触发后按 `when` 重锚定到下一个固定时刻,不再
+  按 `now + 24h` 顺延——网关晚启动/晚补跑不会再让每日推送窗口漂移。
