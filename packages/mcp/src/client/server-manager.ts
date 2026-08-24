@@ -40,10 +40,12 @@ import {
 	type McpTool,
 	type McpTraceSettings,
 	type ServerDefinition,
-	type ServerStreamResultPatchNotification,
-	serverStreamResultPatchNotificationSchema,
 	type Transport,
 } from "./types.ts";
+import {
+	type ServerStreamResultPatchNotification,
+	serverStreamResultPatchNotificationSchema,
+} from "./ui-stream-types.ts";
 import { UnixSocketClientTransport } from "./unix-socket-transport.ts";
 import {
 	resolveBearerToken,
