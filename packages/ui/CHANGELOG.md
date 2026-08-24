@@ -12,3 +12,12 @@
 ### Fixed
 
 - 修复聊天页 SSE delta 事件读取字段(读取 `delta` 而非 `content`),流式增量现在能正确追加到会话气泡;thinking 增量不再干扰正文缓冲。
+- Drift 运行列表在无进行中的 run 时回退展示最近历史运行(此前只查 `drift_active_runs` 表,daemon 空闲时面板恒为空)。
+- Tick 记录读取支持 wake 库:`createWebApi` 新增 `wakeDbPath`,检测到
+  `wake_tick_log` 表时按 wake 结构映射(wake_id→id、status→action、observations
+  计数→步数),tick 详情/步骤路由放宽为非数字 ID。
+- 新增「用量」监控页:`/api/dashboard/usage` 聚合 channel-agent-sessions 里的
+  `message.usage`(总 token/成本、按渠道分布),趋势以**月历**呈现:一行一周、
+  单元格显示当日用量、悬浮显示当天明细(输入/输出/调用次数/成本)、可切换月份;
+  只统计真实聊天用量,不含测试。
+- tick 详情回放为 content 类 observation 展示候选标题列表(前 15 条,带原文链接)。

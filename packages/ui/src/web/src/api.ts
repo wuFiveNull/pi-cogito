@@ -125,6 +125,37 @@ export interface RuntimeOverview {
 	documents?: number;
 }
 
+export interface UsageTotals {
+	totalTokens: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	reasoning: number;
+	cost: number;
+	calls: number;
+}
+
+export interface UsageChannelRow extends UsageTotals {
+	channel: string;
+}
+
+export interface UsageBucketRow {
+	label: string;
+	short: string;
+	totalTokens: number;
+	input: number;
+	output: number;
+	cost: number;
+	calls: number;
+}
+
+export interface UsageOverview {
+	totals: UsageTotals;
+	channels: UsageChannelRow[];
+	days: UsageBucketRow[];
+}
+
 export interface McpServerEntry {
 	command: string;
 	args?: string[];
@@ -197,10 +228,13 @@ export const api = {
 	listMcp: () => requestJson<{ servers: Record<string, McpServerEntry> }>("/api/runtime/mcp"),
 
 	proactiveOverview: () => requestJson<ProactiveOverview>("/api/dashboard/proactive/overview"),
-	listTickLogs: (page = 1, pageSize = 30) =>
-		requestJson<PageResult<TickLogRow>>(`/api/dashboard/proactive/tick_logs?page=${page}&page_size=${pageSize}`),
-	getTickLog: (id: number) => requestJson<TickLogRow>(`/api/dashboard/proactive/tick_logs/${id}`),
-	listTickSteps: (id: number) =>
+	usageOverview: () => requestJson<UsageOverview>("/api/dashboard/usage"),
+	listTickLogs: (page = 1, pageSize = 30, action = "") =>
+		requestJson<PageResult<TickLogRow>>(
+			`/api/dashboard/proactive/tick_logs?page=${page}&page_size=${pageSize}${action ? `&action=${encodeURIComponent(action)}` : ""}`,
+		),
+	getTickLog: (id: string | number) => requestJson<TickLogRow>(`/api/dashboard/proactive/tick_logs/${id}`),
+	listTickSteps: (id: string | number) =>
 		requestJson<PageResult<TickStepRow>>(`/api/dashboard/proactive/tick_logs/${id}/steps`),
 	listDeliveries: (page = 1, pageSize = 30) =>
 		requestJson<PageResult<DeliveryRow>>(`/api/dashboard/proactive/deliveries?page=${page}&page_size=${pageSize}`),
