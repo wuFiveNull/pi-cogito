@@ -435,4 +435,37 @@ describe("web-api extensions", () => {
 		const bad = await get("/api/settings/models?baseUrl=http://127.0.0.1:1");
 		expect(bad.status).toBe(502);
 	});
+	it("serves usage totals and daily buckets with cache hit rate", async () => {
+		const { opts } = makeEnv();
+		writeFileSync(
+			join(opts.sessionsDir, "usage.jsonl"),
+			`${JSON.stringify({
+				type: "message",
+				id: "u1",
+				timestamp: "2026-01-02T00:00:00",
+				message: {
+					role: "assistant",
+					content: "x",
+					usage: {
+						input: 100,
+						output: 50,
+						cacheRead: 100,
+						cacheWrite: 0,
+						totalTokens: 250,
+						cost: { total: 0.001 },
+					},
+				},
+			})}\n`,
+		);
+		const { get } = fakeRequest(opts);
+		const usage = await get("/api/dashboard/usage");
+		const body = usage.body as {
+			totals: { cacheHitRate: number };
+			days: Array<{ label: string; cacheHitRate: number; totalTokens: number }>;
+		};
+		expect(body.totals.cacheHitRate).toBeCloseTo(50);
+		expect(body.days).toHaveLength(1);
+		expect(body.days[0].cacheHitRate).toBeCloseTo(50);
+		expect(body.days[0].totalTokens).toBe(250);
+	});
 });

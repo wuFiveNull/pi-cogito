@@ -501,6 +501,7 @@ export function DashboardView() {
 				<div className="usage-view">
 					<section className="metric-row">
 						<MetricCard label="总 Tokens" value={fmtTokens(usage.totals.totalTokens)} />
+						<MetricCard label="缓存命中率" value={`${usage.totals.cacheHitRate.toFixed(1)}%`} />
 						<MetricCard label="总成本" value={fmtCost(usage.totals.cost)} />
 						<MetricCard label="调用次数" value={String(usage.totals.calls)} />
 						<MetricCard
@@ -680,6 +681,7 @@ function UsageCalendar({ days }: { days: UsageBucketRow[] }) {
 				<div className="usage-calendar__tip">
 					<span className="usage-calendar__tip-date">{hoverRow.label}</span>
 					<span>Tokens {hoverRow.totalTokens.toLocaleString()}（{fmtTokens(hoverRow.totalTokens)}）</span>
+					<span>缓存命中率 {hoverRow.cacheHitRate.toFixed(1)}%</span>
 					<span>输入 {fmtTokens(hoverRow.input)} · 输出 {fmtTokens(hoverRow.output)}</span>
 					<span>调用 {hoverRow.calls} 次 · 成本 {fmtCost(hoverRow.cost)}</span>
 				</div>

@@ -790,8 +790,16 @@ interface UsageBucket {
 	totalTokens: number;
 	input: number;
 	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cacheHitRate: number;
 	cost: number;
 	calls: number;
+}
+
+function cacheHitRate(cacheRead: number, cacheWrite: number, input: number): number {
+	const promptTokens = input + cacheRead + cacheWrite;
+	return promptTokens > 0 ? (cacheRead / promptTokens) * 100 : 0;
 }
 
 /**
@@ -849,12 +857,16 @@ function computeUsage(sessionsDir: string, channelSessionsPath: string | undefin
 	}
 
 	const sum = (selector: (row: UsageRow) => number): number => rows.reduce((acc, row) => acc + selector(row), 0);
+	const totalInput = sum((row) => row.input);
+	const totalCacheRead = sum((row) => row.cacheRead);
+	const totalCacheWrite = sum((row) => row.cacheWrite);
 	const totals = {
 		totalTokens: sum((row) => row.totalTokens),
-		input: sum((row) => row.input),
+		input: totalInput,
 		output: sum((row) => row.output),
-		cacheRead: sum((row) => row.cacheRead),
-		cacheWrite: sum((row) => row.cacheWrite),
+		cacheRead: totalCacheRead,
+		cacheWrite: totalCacheWrite,
+		cacheHitRate: cacheHitRate(totalCacheRead, totalCacheWrite, totalInput),
 		reasoning: sum((row) => row.reasoning),
 		cost: sum((row) => row.cost),
 		calls: rows.length,
@@ -870,13 +882,17 @@ function computeUsage(sessionsDir: string, channelSessionsPath: string | undefin
 		.map(([channel, entries]) => {
 			const pick = (selector: (row: UsageRow) => number): number =>
 				entries.reduce((acc, row) => acc + selector(row), 0);
+			const input = pick((row) => row.input);
+			const cacheRead = pick((row) => row.cacheRead);
+			const cacheWrite = pick((row) => row.cacheWrite);
 			return {
 				channel,
 				totalTokens: pick((row) => row.totalTokens),
-				input: pick((row) => row.input),
+				input,
 				output: pick((row) => row.output),
-				cacheRead: pick((row) => row.cacheRead),
-				cacheWrite: pick((row) => row.cacheWrite),
+				cacheRead,
+				cacheWrite,
+				cacheHitRate: cacheHitRate(cacheRead, cacheWrite, input),
 				reasoning: pick((row) => row.reasoning),
 				cost: pick((row) => row.cost),
 				calls: entries.length,
@@ -901,6 +917,8 @@ function collectDays(rows: UsageRow[]): UsageBucket[] {
 			bucket.totalTokens += row.totalTokens;
 			bucket.input += row.input;
 			bucket.output += row.output;
+			bucket.cacheRead += row.cacheRead;
+			bucket.cacheWrite += row.cacheWrite;
 			bucket.cost += row.cost;
 			bucket.calls += 1;
 		} else {
@@ -910,12 +928,20 @@ function collectDays(rows: UsageRow[]): UsageBucket[] {
 				totalTokens: row.totalTokens,
 				input: row.input,
 				output: row.output,
+				cacheRead: row.cacheRead,
+				cacheWrite: row.cacheWrite,
+				cacheHitRate: 0,
 				cost: row.cost,
 				calls: 1,
 			});
 		}
 	}
-	return [...days.values()].sort((a, b) => a.label.localeCompare(b.label));
+	return [...days.values()]
+		.map((day) => ({
+			...day,
+			cacheHitRate: cacheHitRate(day.cacheRead, day.cacheWrite, day.input),
+		}))
+		.sort((a, b) => a.label.localeCompare(b.label));
 }
 
 function entryTime(entry: { timestamp?: unknown; message?: { timestamp?: unknown } }): number | undefined {
