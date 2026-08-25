@@ -1,6 +1,6 @@
 /**
- * SDK 构建:esbuild 打包 react 系 shims → dist/web/sdk/。
- * 顺序:先 vite(sdk.js,清空 sdk 目录),再 esbuild(shims 覆盖写)。
+ * SDK 构建:esbuild 打包 react 系 shims → dist/web/assets/sdk/。
+ * 顺序:先 vite(sdk.js,清空 assets/sdk 目录),再 esbuild(shims 覆盖写)。
  */
 
 import { execSync } from "node:child_process";
@@ -26,7 +26,7 @@ const shims = [
 ];
 for (const [name, entry] of shims) {
 	execSync(
-		`"${esbuild}" "${resolve(root, entry)}" --bundle --format=esm --outfile="${resolve(root, "dist", "web", "sdk", `${name}.js`)}" --log-level=warning`,
+		`"${esbuild}" "${resolve(root, entry)}" --bundle --format=esm --outfile="${resolve(root, "dist", "web", "assets", "sdk", `${name}.js`)}" --log-level=warning`,
 		{ cwd: root, stdio: "inherit" },
 	);
 }
