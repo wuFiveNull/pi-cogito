@@ -131,7 +131,7 @@ export interface UsageTotals {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
-	cacheHitRate: number;
+	cacheHitRate?: number;
 	reasoning: number;
 	cost: number;
 	calls: number;
@@ -147,7 +147,7 @@ export interface UsageBucketRow {
 	totalTokens: number;
 	input: number;
 	output: number;
-	cacheHitRate: number;
+	cacheHitRate?: number;
 	cost: number;
 	calls: number;
 }
