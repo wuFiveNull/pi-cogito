@@ -14,12 +14,6 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerDefinition, McpServerTool, McpServerTransportConfig } from "./types.ts";
 
-function normalizeInputSchema(inputSchema: McpServerTool["inputSchema"]): unknown {
-	if (inputSchema === undefined) return undefined;
-	// JSON schema objects are passed through; zod schemas are used as-is.
-	return inputSchema;
-}
-
 export class McpServerService {
 	private readonly server: McpServer;
 	private readonly serverName: string;
@@ -50,7 +44,7 @@ export class McpServerService {
 
 	/** Register one tool. Safe to call before serve(); throws on duplicate names. */
 	registerTool(tool: McpServerTool): void {
-		const schema = normalizeInputSchema(tool.inputSchema);
+		const schema = tool.inputSchema;
 		// SDK 类型使用其内置 zod 实例的 schema 类型;zod4 与 SDK 的 zod 类型不重叠,
 		// 运行时经 SDK 的 parseWithCompat(JSON-schema 兼容层)处理,类型层走签名推导断言。
 		const config = {

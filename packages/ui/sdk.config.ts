@@ -10,7 +10,7 @@ const here = resolve(import.meta.dirname);
 
 export default defineConfig({
 	build: {
-		outDir: "dist/web/sdk",
+		outDir: "dist/web/assets/sdk",
 		emptyOutDir: true,
 		sourcemap: false,
 		lib: {

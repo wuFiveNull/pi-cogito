@@ -44,3 +44,19 @@
     (只取 Compression/Ongoing Threads,裁掉 Recent Turns)→ 向量召回块的顺序注入
     稳定档案(akashic prompt-block 优先级移植),文件缺失时跳过该段;新增
     `chat.memory.injectProfile` 开关(默认 true)控制稳定档案注入。
+
+### Fixed
+
+- `message_push` 不再强制要求 `target_channel`/`target_chat_id`:省略时回落到当前会话
+  所在渠道(per-session scope),避免推送到未指定的目标。
+- 每日 `every` 定时任务(如 `09:00`)补触发后按 `when` 重锚定到下一个固定时刻,不再
+  按 `now + 24h` 顺延——网关晚启动/晚补跑不会再让每日推送窗口漂移。
+- Web 仪表盘「会话」面板现在读取 `channel-agent-sessions` 目录:之前挂在
+  `agentDir/sessions`(coding-agent 会话)上,聊天会话从不落盘到那里,导致
+  会话列表/消息恒为空。
+- Web 仪表盘 Drift 运行面板接入 `drift.db`(此前 `driftDbPath` 未传入,面板恒为空)。
+- Web 仪表盘 Tick 记录接入 wake 生命周期库(`wake_proactive.db`):proactive 跑 wake
+  lifecycle 时 tick/observations 落在独立 wake 库,此前面板只读 legacy
+  `proactive.sqlite` 的 `tick_log`(恒为空)。
+- Web 仪表盘传入 `channelSessionsPath`(channel-sessions.json),支撑用量页的
+  会话文件 → 渠道映射。

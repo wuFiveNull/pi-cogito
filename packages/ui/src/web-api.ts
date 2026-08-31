@@ -21,6 +21,8 @@ export interface WebApiOptions {
 	sessionsDir: string;
 	/** proactive.sqlite 路径 */
 	proactiveDbPath: string;
+	/** wake 生命周期下的 tick 库(wake_proactive.db);缺省时 tick 面板沿用 proactiveDbPath。 */
+	wakeDbPath?: string;
 	/** memory/memory.sqlite 路径 */
 	memoryDbPath?: string;
 	/** drift/drift.db 路径(投递确认时回写 drift run 的 message_result)。 */
@@ -31,6 +33,8 @@ export interface WebApiOptions {
 	mcpConfigPath?: string;
 	/** web 设置存储路径(独立于 pi 的 settings.json) */
 	settingsPath?: string;
+	/** channel-sessions.json 路径(会话文件 → 渠道映射,usage 统计用)。 */
+	channelSessionsPath?: string;
 	/** 插件面板(宿主注册,如 proactive 审计面板)。 */
 	plugins?: WebPlugin[];
 }
@@ -337,6 +341,8 @@ interface TickStepRow {
 	action_after: string;
 	skip_reason_after: string;
 	duration_ms: number;
+	/** content 类 observation 的候选标题列表(取前 15 条)。 */
+	candidates?: Array<{ title: string; url?: string }>;
 }
 
 function openDb(path: string): DatabaseSync | null {
@@ -347,10 +353,77 @@ function openDb(path: string): DatabaseSync | null {
 	}
 }
 
-function listTickLogs(dbPath: string, page: number, pageSize: number): { items: TickLogRow[]; total: number } {
+/** wake 生命周期: tick 记录在独立的 wake_proactive.db 里。 */
+function tickDbPath(o: WebApiOptions): string {
+	return o.wakeDbPath && existsSync(o.wakeDbPath) ? o.wakeDbPath : o.proactiveDbPath;
+}
+
+function hasTable(db: DatabaseSync, name: string): boolean {
+	try {
+		db.prepare(`SELECT 1 FROM ${name} LIMIT 1`).get();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * wake_tick_log 行映射为 dashboard 的 TickLogRow:
+ * - action 取该 tick 最近一条 observation 的 kind(drift/content),无 observation 时退回 status;
+ * - skip_reason 取 trigger 的 reason(如 wake_idle);
+ * - candidates 为该 tick 全部 observation 的 candidates_json 长度之和;
+ * - steps 为 observation 条数。
+ */
+const WAKE_TICK_SELECT = `SELECT t.wake_id AS id, t.started_at, t.finished_at,
+	COALESCE((SELECT o.kind FROM wake_observations o WHERE o.wake_id = t.wake_id ORDER BY o.id DESC LIMIT 1), t.status) AS action,
+	COALESCE((SELECT json_extract(o.trigger_json, '$.reason') FROM wake_observations o WHERE o.wake_id = t.wake_id ORDER BY o.id DESC LIMIT 1), '') AS skip_reason,
+	(SELECT COALESCE(SUM(json_array_length(o.candidates_json)), 0) FROM wake_observations o WHERE o.wake_id = t.wake_id) AS candidates,
+	(SELECT COUNT(*) FROM wake_observations o WHERE o.wake_id = t.wake_id) AS steps,
+	t.base_score, t.error FROM wake_tick_log t`;
+
+/** action 过滤用的表达式(wake 下与行内 action 列一致)。 */
+const WAKE_TICK_ACTION_EXPR = `COALESCE((SELECT o.kind FROM wake_observations o WHERE o.wake_id = t.wake_id ORDER BY o.id DESC LIMIT 1), t.status)`;
+
+function listTickLogs(
+	dbPath: string,
+	page: number,
+	pageSize: number,
+	action = "",
+): { items: TickLogRow[]; total: number } {
 	const db = openDb(dbPath);
 	if (!db) return { items: [], total: 0 };
 	try {
+		if (hasTable(db, "wake_tick_log")) {
+			if (action) {
+				const total = (
+					db
+						.prepare(`SELECT COUNT(*) AS n FROM wake_tick_log t WHERE ${WAKE_TICK_ACTION_EXPR} = ?`)
+						.get(action) as { n: number }
+				).n;
+				const rows = db
+					.prepare(
+						`${WAKE_TICK_SELECT} WHERE ${WAKE_TICK_ACTION_EXPR} = ? ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+					)
+					.all(action, pageSize, (page - 1) * pageSize) as unknown as TickLogRow[];
+				return { items: rows, total };
+			}
+			const total = (db.prepare("SELECT COUNT(*) AS n FROM wake_tick_log").get() as { n: number }).n;
+			const rows = db
+				.prepare(`${WAKE_TICK_SELECT} ORDER BY started_at DESC LIMIT ? OFFSET ?`)
+				.all(pageSize, (page - 1) * pageSize) as unknown as TickLogRow[];
+			return { items: rows, total };
+		}
+		if (action) {
+			const total = (
+				db.prepare("SELECT COUNT(*) AS n FROM tick_log WHERE action = ?").get(action) as {
+					n: number;
+				}
+			).n;
+			const rows = db
+				.prepare("SELECT * FROM tick_log WHERE action = ? ORDER BY started_at DESC LIMIT ? OFFSET ?")
+				.all(action, pageSize, (page - 1) * pageSize) as unknown as TickLogRow[];
+			return { items: rows, total };
+		}
 		const total = (db.prepare("SELECT COUNT(*) AS n FROM tick_log").get() as { n: number }).n;
 		const rows = db
 			.prepare("SELECT * FROM tick_log ORDER BY started_at DESC LIMIT ? OFFSET ?")
@@ -361,10 +434,43 @@ function listTickLogs(dbPath: string, page: number, pageSize: number): { items: 
 	}
 }
 
-function listTickSteps(dbPath: string, tickId: number): TickStepRow[] {
+function listTickSteps(dbPath: string, tickId: string | number): TickStepRow[] {
 	const db = openDb(dbPath);
 	if (!db) return [];
 	try {
+		if (hasTable(db, "wake_tick_log")) {
+			const rows = db
+				.prepare(
+					`SELECT id, wake_id AS tick_id, 0 AS step_index, kind AS phase,
+						COALESCE(json_extract(trigger_json, '$.reason'), json_extract(trigger_json, '$.verdict'), kind) AS detail,
+						NULL AS action_after, NULL AS skip_reason_after, 0 AS duration_ms,
+						candidates_json
+					 FROM wake_observations WHERE wake_id = ? ORDER BY id ASC`,
+				)
+				.all(String(tickId)) as unknown as Array<TickStepRow & { candidates_json: string | null }>;
+			for (const row of rows) {
+				const candidates: NonNullable<TickStepRow["candidates"]> = [];
+				try {
+					const parsed = JSON.parse(row.candidates_json ?? "");
+					if (Array.isArray(parsed)) {
+						for (const item of parsed.slice(0, 15)) {
+							if (!item || typeof item !== "object") continue;
+							const record = item as { title?: unknown; url?: unknown };
+							const title = String(record.title ?? "").trim();
+							if (!title) continue;
+							candidates.push({
+								title: title.slice(0, 120),
+								...(typeof record.url === "string" && record.url.length > 0 ? { url: record.url } : {}),
+							});
+						}
+					}
+				} catch {
+					// ignore malformed candidates_json
+				}
+				if (candidates.length > 0) row.candidates = candidates;
+			}
+			return rows as unknown as TickStepRow[];
+		}
 		return db
 			.prepare("SELECT * FROM tick_steps WHERE tick_id = ? ORDER BY step_index ASC")
 			.all(tickId) as unknown as TickStepRow[];
@@ -373,10 +479,16 @@ function listTickSteps(dbPath: string, tickId: number): TickStepRow[] {
 	}
 }
 
-function getTickLog(dbPath: string, id: number): TickLogRow | null {
+function getTickLog(dbPath: string, id: string | number): TickLogRow | null {
 	const db = openDb(dbPath);
 	if (!db) return null;
 	try {
+		if (hasTable(db, "wake_tick_log")) {
+			const row = db.prepare(`${WAKE_TICK_SELECT} WHERE t.wake_id = ?`).get(String(id)) as unknown as
+				| TickLogRow
+				| undefined;
+			return row ?? null;
+		}
 		const row = db.prepare("SELECT * FROM tick_log WHERE id = ?").get(id) as unknown as TickLogRow | undefined;
 		return row ?? null;
 	} finally {
@@ -432,13 +544,26 @@ function listDriftActiveRuns(
 	if (!db) return { items: [], total: 0 };
 	try {
 		const total = (db.prepare("SELECT COUNT(*) AS n FROM drift_active_runs").get() as { n: number }).n;
+		if (total > 0) {
+			const items = db
+				.prepare(
+					`SELECT run_id, session_key, started_at, updated_at, stage, skill_name, message_hash
+					 FROM drift_active_runs ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+				)
+				.all(pageSize, (page - 1) * pageSize) as unknown as DriftActiveRunRow[];
+			return { items, total };
+		}
+		// 无进行中的 run 时回退到最近历史运行,便于观察 drift 一直在活动。
 		const items = db
 			.prepare(
-				`SELECT run_id, session_key, started_at, updated_at, stage, skill_name, message_hash
-				 FROM drift_active_runs ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+				`SELECT run_id, session_key, started_at,
+						COALESCE(finished_at, started_at) AS updated_at,
+						status AS stage, skill_name, message_hash
+				 FROM runs ORDER BY id DESC LIMIT ? OFFSET ?`,
 			)
 			.all(pageSize, (page - 1) * pageSize) as unknown as DriftActiveRunRow[];
-		return { items, total };
+		const historyTotal = (db.prepare("SELECT COUNT(*) AS n FROM runs").get() as { n: number }).n;
+		return { items, total: historyTotal };
 	} catch {
 		return { items: [], total: 0 };
 	} finally {
@@ -543,30 +668,77 @@ async function ackDeliveries(req: IncomingMessage, res: ServerResponse, o: WebAp
 	}
 }
 
-function proactiveOverview(dbPath: string): Record<string, unknown> {
-	const db = openDb(dbPath);
-	if (!db) return {};
+/**
+ * 概览指标:wake 生命周期下 tick 统计来自 wake_proactive.db(tick 落独立库),
+ * 投递/候选分别取 deliveries 表与 reservoir_events 表;legacy 生命周期单库。
+ */
+function proactiveOverview(dbPath: string, wakeDbPath?: string): Record<string, unknown> {
+	const tickPath = wakeDbPath && existsSync(wakeDbPath) ? wakeDbPath : dbPath;
+	const tickDb = openDb(tickPath);
+	const storeDb = openDb(dbPath);
+	const wake = tickDb !== null && hasTable(tickDb, "wake_tick_log");
+	const actionCounts: Record<string, number> = {};
+	const skipCounts: Record<string, number> = {};
+	let lastTick: TickLogRow | null = null;
+	let deliveryCount = 0;
+	const itemCounts = { total: 0, new: 0, pushed: 0 };
 	try {
-		const actionCounts: Record<string, number> = {};
-		const skipCounts: Record<string, number> = {};
-		for (const row of db.prepare("SELECT action, skip_reason FROM tick_log").all() as unknown as Array<{
-			action: string;
-			skip_reason: string;
-		}>) {
-			actionCounts[row.action] = (actionCounts[row.action] ?? 0) + 1;
-			if (row.skip_reason) skipCounts[row.skip_reason] = (skipCounts[row.skip_reason] ?? 0) + 1;
+		if (tickDb) {
+			if (wake) {
+				for (const row of tickDb
+					.prepare(
+						`SELECT COALESCE((SELECT o.kind FROM wake_observations o WHERE o.wake_id = t.wake_id ORDER BY o.id DESC LIMIT 1), t.status) AS action,
+							COALESCE((SELECT json_extract(o.trigger_json, '$.reason') FROM wake_observations o WHERE o.wake_id = t.wake_id ORDER BY o.id DESC LIMIT 1), '') AS skip_reason
+						 FROM wake_tick_log t`,
+					)
+					.all() as unknown as Array<{ action: string; skip_reason: string }>) {
+					actionCounts[row.action] = (actionCounts[row.action] ?? 0) + 1;
+					if (row.skip_reason) skipCounts[row.skip_reason] = (skipCounts[row.skip_reason] ?? 0) + 1;
+				}
+				lastTick =
+					(tickDb.prepare(`${WAKE_TICK_SELECT} ORDER BY started_at DESC LIMIT 1`).get() as unknown as
+						| TickLogRow
+						| undefined) ?? null;
+				if (hasTable(tickDb, "reservoir_events")) {
+					itemCounts.total = (
+						tickDb.prepare("SELECT COUNT(*) AS n FROM reservoir_events").get() as { n: number }
+					).n;
+					itemCounts.new = (
+						tickDb
+							.prepare("SELECT COUNT(*) AS n FROM reservoir_events WHERE status IN ('unread', 'pending_expiry')")
+							.get() as { n: number }
+					).n;
+					itemCounts.pushed = (
+						tickDb.prepare("SELECT COUNT(*) AS n FROM reservoir_events WHERE status = 'consumed'").get() as {
+							n: number;
+						}
+					).n;
+				}
+			} else {
+				for (const row of tickDb.prepare("SELECT action, skip_reason FROM tick_log").all() as unknown as Array<{
+					action: string;
+					skip_reason: string;
+				}>) {
+					actionCounts[row.action] = (actionCounts[row.action] ?? 0) + 1;
+					if (row.skip_reason) skipCounts[row.skip_reason] = (skipCounts[row.skip_reason] ?? 0) + 1;
+				}
+				lastTick =
+					(tickDb.prepare("SELECT * FROM tick_log ORDER BY started_at DESC LIMIT 1").get() as unknown as
+						| TickLogRow
+						| undefined) ?? null;
+			}
 		}
-		const lastTick = db.prepare("SELECT * FROM tick_log ORDER BY started_at DESC LIMIT 1").get() as unknown as
-			| TickLogRow
-			| undefined;
-		const deliveryCount = (db.prepare("SELECT COUNT(*) AS n FROM deliveries").get() as { n: number }).n;
-		const itemCounts = { total: 0, new: 0, pushed: 0 };
-		for (const row of db
-			.prepare("SELECT status, COUNT(*) AS n FROM items GROUP BY status")
-			.all() as unknown as Array<{ status: string; n: number }>) {
-			itemCounts.total += row.n;
-			if (row.status === "new") itemCounts.new = row.n;
-			if (row.status === "pushed") itemCounts.pushed = row.n;
+		if (storeDb) {
+			deliveryCount = (storeDb.prepare("SELECT COUNT(*) AS n FROM deliveries").get() as { n: number }).n;
+			if (!wake) {
+				for (const row of storeDb
+					.prepare("SELECT status, COUNT(*) AS n FROM items GROUP BY status")
+					.all() as unknown as Array<{ status: string; n: number }>) {
+					itemCounts.total += row.n;
+					if (row.status === "new") itemCounts.new = row.n;
+					if (row.status === "pushed") itemCounts.pushed = row.n;
+				}
+			}
 		}
 		return {
 			action_counts: actionCounts,
@@ -576,7 +748,8 @@ function proactiveOverview(dbPath: string): Record<string, unknown> {
 			last_tick: lastTick ?? null,
 		};
 	} finally {
-		db.close();
+		tickDb?.close();
+		storeDb?.close();
 	}
 }
 
@@ -593,6 +766,198 @@ interface MemoryRow {
 	status: string;
 	created_at: string;
 	updated_at: string;
+}
+
+// ------------------------------------------------------------------
+// 用量(token 统计;只统计会话文件里的真实聊天用量,不含测试)
+// ------------------------------------------------------------------
+
+interface UsageRow {
+	channel: string;
+	timestamp: number;
+	totalTokens: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	reasoning: number;
+	cost: number;
+}
+
+interface UsageBucket {
+	label: string;
+	short: string;
+	totalTokens: number;
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cacheHitRate: number;
+	cost: number;
+	calls: number;
+}
+
+function cacheHitRate(cacheRead: number, cacheWrite: number, input: number): number {
+	const promptTokens = input + cacheRead + cacheWrite;
+	return promptTokens > 0 ? (cacheRead / promptTokens) * 100 : 0;
+}
+
+/**
+ * 从 channel-agent-sessions/*.jsonl 的 message.usage 聚合用量:
+ * 按渠道(channel-sessions.json 映射,缺省取文件名)、按天(完整日历数据)。
+ */
+function computeUsage(sessionsDir: string, channelSessionsPath: string | undefined): Record<string, unknown> {
+	const channelByFile = new Map<string, string>();
+	if (channelSessionsPath) {
+		try {
+			const store = JSON.parse(readFileSync(channelSessionsPath, "utf-8")) as {
+				sessions?: Record<string, { channel?: unknown; agentSessionFile?: unknown }>;
+			};
+			for (const session of Object.values(store.sessions ?? {})) {
+				if (typeof session.agentSessionFile !== "string" || typeof session.channel !== "string") continue;
+				channelByFile.set(keyOf(session.agentSessionFile), session.channel);
+			}
+		} catch {
+			// ignore unreadable mapping
+		}
+	}
+
+	const rows: UsageRow[] = [];
+	for (const file of sessionFiles(sessionsDir)) {
+		const channel = channelByFile.get(keyOf(file)) ?? keyOf(file);
+		for (const line of readFileSync(file, "utf-8").split("\n")) {
+			if (!line.trim()) continue;
+			try {
+				const entry = JSON.parse(line) as {
+					timestamp?: unknown;
+					message?: { timestamp?: unknown; usage?: unknown };
+				};
+				const usage = entry.message?.usage;
+				if (!usage || typeof usage !== "object" || usage === null) continue;
+				const timestamp = entryTime(entry);
+				if (timestamp === undefined) continue;
+				const usageRecord = usage as Record<string, unknown>;
+				const num = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+				const costRecord = usageRecord.cost;
+				rows.push({
+					channel,
+					timestamp,
+					totalTokens: num(usageRecord.totalTokens),
+					input: num(usageRecord.input),
+					output: num(usageRecord.output),
+					cacheRead: num(usageRecord.cacheRead),
+					cacheWrite: num(usageRecord.cacheWrite),
+					reasoning: num(usageRecord.reasoning),
+					cost: costRecord && typeof costRecord === "object" ? num((costRecord as { total?: unknown }).total) : 0,
+				});
+			} catch {
+				// skip malformed lines
+			}
+		}
+	}
+
+	const sum = (selector: (row: UsageRow) => number): number => rows.reduce((acc, row) => acc + selector(row), 0);
+	const totalInput = sum((row) => row.input);
+	const totalCacheRead = sum((row) => row.cacheRead);
+	const totalCacheWrite = sum((row) => row.cacheWrite);
+	const totals = {
+		totalTokens: sum((row) => row.totalTokens),
+		input: totalInput,
+		output: sum((row) => row.output),
+		cacheRead: totalCacheRead,
+		cacheWrite: totalCacheWrite,
+		cacheHitRate: cacheHitRate(totalCacheRead, totalCacheWrite, totalInput),
+		reasoning: sum((row) => row.reasoning),
+		cost: sum((row) => row.cost),
+		calls: rows.length,
+	};
+
+	const channelMap = new Map<string, UsageRow[]>();
+	for (const row of rows) {
+		const bucket = channelMap.get(row.channel);
+		if (bucket) bucket.push(row);
+		else channelMap.set(row.channel, [row]);
+	}
+	const channels = [...channelMap.entries()]
+		.map(([channel, entries]) => {
+			const pick = (selector: (row: UsageRow) => number): number =>
+				entries.reduce((acc, row) => acc + selector(row), 0);
+			const input = pick((row) => row.input);
+			const cacheRead = pick((row) => row.cacheRead);
+			const cacheWrite = pick((row) => row.cacheWrite);
+			return {
+				channel,
+				totalTokens: pick((row) => row.totalTokens),
+				input,
+				output: pick((row) => row.output),
+				cacheRead,
+				cacheWrite,
+				cacheHitRate: cacheHitRate(cacheRead, cacheWrite, input),
+				reasoning: pick((row) => row.reasoning),
+				cost: pick((row) => row.cost),
+				calls: entries.length,
+			};
+		})
+		.sort((a, b) => b.totalTokens - a.totalTokens);
+
+	return {
+		totals,
+		channels,
+		days: collectDays(rows),
+	};
+}
+
+/** 按本地日期聚合全部有数据的天(补足每个月内无数据的日期由前端日历处理)。 */
+function collectDays(rows: UsageRow[]): UsageBucket[] {
+	const days = new Map<string, UsageBucket>();
+	for (const row of rows) {
+		const key = localDayKey(row.timestamp);
+		const bucket = days.get(key);
+		if (bucket) {
+			bucket.totalTokens += row.totalTokens;
+			bucket.input += row.input;
+			bucket.output += row.output;
+			bucket.cacheRead += row.cacheRead;
+			bucket.cacheWrite += row.cacheWrite;
+			bucket.cost += row.cost;
+			bucket.calls += 1;
+		} else {
+			days.set(key, {
+				label: key,
+				short: key.slice(5),
+				totalTokens: row.totalTokens,
+				input: row.input,
+				output: row.output,
+				cacheRead: row.cacheRead,
+				cacheWrite: row.cacheWrite,
+				cacheHitRate: 0,
+				cost: row.cost,
+				calls: 1,
+			});
+		}
+	}
+	return [...days.values()]
+		.map((day) => ({
+			...day,
+			cacheHitRate: cacheHitRate(day.cacheRead, day.cacheWrite, day.input),
+		}))
+		.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function entryTime(entry: { timestamp?: unknown; message?: { timestamp?: unknown } }): number | undefined {
+	if (typeof entry.timestamp === "string") {
+		const parsed = Date.parse(entry.timestamp);
+		if (Number.isFinite(parsed)) return parsed;
+	}
+	if (typeof entry.timestamp === "number" && Number.isFinite(entry.timestamp)) return entry.timestamp;
+	const messageTimestamp = entry.message?.timestamp;
+	if (typeof messageTimestamp === "number" && Number.isFinite(messageTimestamp)) return messageTimestamp;
+	return undefined;
+}
+
+function localDayKey(timestamp: number): string {
+	const date = new Date(timestamp);
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function listMemories(
@@ -871,23 +1236,28 @@ function route(req: IncomingMessage, res: ServerResponse, url: URL, o: WebApiOpt
 			return true;
 		}
 		// Proactive dashboard
+		if (req.method === "GET" && path === "/api/dashboard/usage") {
+			json(res, 200, computeUsage(o.sessionsDir, o.channelSessionsPath));
+			return true;
+		}
 		if (req.method === "GET" && path === "/api/dashboard/proactive/overview") {
-			json(res, 200, proactiveOverview(o.proactiveDbPath));
+			json(res, 200, proactiveOverview(o.proactiveDbPath, o.wakeDbPath));
 			return true;
 		}
 		if (req.method === "GET" && path === "/api/dashboard/proactive/tick_logs") {
 			const { page, page_size } = pageParams(url);
-			json(res, 200, listTickLogs(o.proactiveDbPath, page, page_size));
+			const action = url.searchParams.get("action") ?? "";
+			json(res, 200, listTickLogs(tickDbPath(o), page, page_size, action));
 			return true;
 		}
-		const tickStepsMatch = path.match(/^\/api\/dashboard\/proactive\/tick_logs\/(\d+)\/steps$/);
+		const tickStepsMatch = path.match(/^\/api\/dashboard\/proactive\/tick_logs\/([^/]+)\/steps$/);
 		if (req.method === "GET" && tickStepsMatch) {
-			json(res, 200, { items: listTickSteps(o.proactiveDbPath, Number(tickStepsMatch[1])) });
+			json(res, 200, { items: listTickSteps(tickDbPath(o), decodeURIComponent(tickStepsMatch[1])) });
 			return true;
 		}
-		const tickMatch = path.match(/^\/api\/dashboard\/proactive\/tick_logs\/(\d+)$/);
+		const tickMatch = path.match(/^\/api\/dashboard\/proactive\/tick_logs\/([^/]+)$/);
 		if (req.method === "GET" && tickMatch) {
-			const row = getTickLog(o.proactiveDbPath, Number(tickMatch[1]));
+			const row = getTickLog(tickDbPath(o), decodeURIComponent(tickMatch[1]));
 			if (!row) {
 				json(res, 404, { error: "tick not found" });
 			} else {

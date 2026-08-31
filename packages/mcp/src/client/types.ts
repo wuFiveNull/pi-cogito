@@ -142,37 +142,6 @@ export interface UiHostContext {
 
 export type UiDisplayMode = "inline" | "fullscreen" | "pip";
 
-// Re-export stream types from the shared lightweight module.
-// This allows the example package to import stream schemas without pulling the full types.ts dependency graph.
-export {
-	getUiStreamHostContext,
-	getVisualizationStreamEnvelope,
-	SERVER_STREAM_RESULT_PATCH_METHOD,
-	type ServerStreamResultPatchNotification,
-	serverStreamResultPatchNotificationSchema,
-	UI_STREAM_HOST_CONTEXT_KEY,
-	UI_STREAM_REQUEST_META_KEY,
-	UI_STREAM_RESULT_PATCH_METHOD,
-	UI_STREAM_STRUCTURED_CONTENT_KEY,
-	type UiStreamCallToolResult,
-	type UiStreamHostContext,
-	type UiStreamMode,
-	type UiStreamResultPatchNotification,
-	type UiStreamSummary,
-	uiStreamCallToolResultSchema,
-	uiStreamHostContextSchema,
-	uiStreamModeSchema,
-	uiStreamResultPatchNotificationSchema,
-	type VisualizationStreamEnvelope,
-	type VisualizationStreamFrameType,
-	type VisualizationStreamPhase,
-	type VisualizationStreamStatus,
-	visualizationStreamEnvelopeSchema,
-	visualizationStreamFrameTypeSchema,
-	visualizationStreamPhaseSchema,
-	visualizationStreamStatusSchema,
-} from "./ui-stream-types.ts";
-
 export interface UiMessageParams {
 	role?: string;
 	content?: unknown[];

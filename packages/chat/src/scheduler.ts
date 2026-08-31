@@ -146,9 +146,11 @@ export class ChatScheduler {
 
 	private async fire(job: ChatScheduleJob, now: number): Promise<void> {
 		// 占用下一次触发槽位,防止生成/投递耗时期间(soft 生成可达数十秒)
-		// 后续 tick 重复触发同一到期的任务。
-		if (job.intervalMs !== undefined) {
-			job.nextFireAt = new Date(now + job.intervalMs).toISOString();
+		// 后续 tick 重复触发同一到期的任务。every 任务按 when 重算下一个
+		// 触发时刻(如 "09:00" = 每天 9 点,补触发后仍回到固定时刻,不会顺延)。
+		const nextFireAt = nextFireAtAfter(job, now);
+		if (nextFireAt !== undefined) {
+			job.nextFireAt = new Date(nextFireAt).toISOString();
 		} else {
 			job.enabled = false;
 		}
@@ -261,6 +263,16 @@ function computeNextFireAt(trigger: ChatScheduleTrigger, when: string, now: numb
 		return at.getTime() <= now ? at.getTime() + 86_400_000 : at.getTime();
 	}
 	return at.getTime();
+}
+
+/** 计算任务的下一触发时刻;返回 undefined 表示应禁用(一次性任务已结束)。 */
+function nextFireAtAfter(job: ChatScheduleJob, now: number): number | undefined {
+	if (job.trigger !== "every") return undefined;
+	const durationMs = parseDuration(job.when);
+	if (durationMs !== undefined) return now + durationMs;
+	// 每日固定时刻(如 "09:00"):从 when 算下一个整点,补触发后仍回到固定时刻,
+	// 不按 intervalMs(24h)顺延,避免补触发把推送钉在晚点时刻。
+	return computeNextFireAt("every", job.when, now);
 }
 
 function intervalForEvery(when: string): number | undefined {

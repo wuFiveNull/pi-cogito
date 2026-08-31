@@ -13,11 +13,19 @@ import {
 	type SessionRow,
 	type TickLogRow,
 	type TickStepRow,
+	type UsageBucketRow,
+	type UsageOverview,
 	type WebPluginInfo,
 } from "../api.ts";
 import { MessageView } from "../message-view.tsx";
 
-type DashboardTab = "sessions" | "tick" | "deliveries" | "drift" | "memories" | "plugins";
+type DashboardTab = "sessions" | "tick" | "deliveries" | "drift" | "memories" | "usage" | "plugins";
+
+/**
+ * 插件 tab 暂时隐藏(宿主尚未注册任何 WebPlugin,面板恒为空)。
+ * 恢复显示:改为 true。
+ */
+const PLUGINS_TAB_ENABLED = false;
 
 export function DashboardView() {
 	const [tab, setTab] = useState<DashboardTab>("tick");
@@ -37,6 +45,7 @@ export function DashboardView() {
 	const [sessions, setSessions] = useState<SessionRow[]>([]);
 	const [activeSession, setActiveSession] = useState<SessionRow | null>(null);
 	const [sessionMessages, setSessionMessages] = useState<ChatMessageRow[]>([]);
+	const [usage, setUsage] = useState<UsageOverview | null>(null);
 	const [error, setError] = useState("");
 	const [actionFilter, setActionFilter] = useState<string>("");
 	const [plugins, setPlugins] = useState<WebPluginInfo[]>([]);
@@ -45,10 +54,12 @@ export function DashboardView() {
 	const [pluginContainer, setPluginContainer] = useState<HTMLDivElement | null>(null);
 	const [pluginModuleError, setPluginModuleError] = useState("");
 
-	const load = () => {
+	const load = (filter = actionFilter) => {
 		setError("");
 		api.proactiveOverview().catch(() => null).then(setOverview);
-		api.listTickLogs().then((page) => setTicks(page.items)).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+		api.listTickLogs(1, filter ? 200 : 50, filter)
+			.then((page) => setTicks(page.items))
+			.catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
 		api.listDeliveries()
 			.then((page) => {
 				setDeliveries(page.items);
@@ -60,12 +71,15 @@ export function DashboardView() {
 		api.listDriftActiveRuns().then((page) => setDriftRuns(page.items)).catch(() => setDriftRuns([]));
 		api.listMemories().then((page) => setMemories(page.items)).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
 		api.listSessions().then((page) => setSessions(page.items)).catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+		api.usageOverview().then(setUsage).catch(() => setUsage(null));
 		api.listPlugins().then((page) => setPlugins(page.items)).catch(() => setPlugins([]));
 	};
 
+	// actionFilter 变化时按服务端过滤重新拉取 tick(客户端过滤只作用于当前页,翻不到历史行)。
 	useEffect(() => {
 		load();
-	}, []);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [actionFilter]);
 
 	const openSession = (session: SessionRow) => {
 		setActiveSession(session);
@@ -203,7 +217,10 @@ export function DashboardView() {
 				<button type="button" role="tab" className={tab === "deliveries" ? "active" : ""} onClick={() => setTab("deliveries")}>投递</button>
 				<button type="button" role="tab" className={tab === "drift" ? "active" : ""} onClick={() => setTab("drift")}>Drift 运行</button>
 				<button type="button" role="tab" className={tab === "memories" ? "active" : ""} onClick={() => setTab("memories")}>记忆</button>
-				<button type="button" role="tab" className={tab === "plugins" ? "active" : ""} onClick={() => setTab("plugins")}>插件</button>
+				<button type="button" role="tab" className={tab === "usage" ? "active" : ""} onClick={() => setTab("usage")}>用量</button>
+				{PLUGINS_TAB_ENABLED && (
+					<button type="button" role="tab" className={tab === "plugins" ? "active" : ""} onClick={() => setTab("plugins")}>插件</button>
+				)}
 			</nav>
 
 			{tab === "sessions" && (
@@ -308,6 +325,19 @@ export function DashboardView() {
 											<span className="step-item__time">{step.duration_ms}ms</span>
 										</div>
 										<div className="step-item__detail">{step.detail}</div>
+										{step.candidates && step.candidates.length > 0 && (
+											<ul className="step-item__candidates">
+												{step.candidates.map((candidate, index) => (
+													<li key={index}>
+														{candidate.url ? (
+															<a href={candidate.url} target="_blank" rel="noreferrer">{candidate.title}</a>
+														) : (
+															<span>{candidate.title}</span>
+														)}
+													</li>
+												))}
+											</ul>
+										)}
 										{step.action_after && (
 											<div className="step-item__after">
 												→ <span className={`tag tag-${step.action_after}`}>{step.action_after}</span>
@@ -467,7 +497,52 @@ export function DashboardView() {
 					)}
 				</div>
 			)}
-			{tab === "plugins" && (
+			{tab === "usage" && usage && (
+				<div className="usage-view">
+					<section className="metric-row">
+						<MetricCard label="总 Tokens" value={fmtTokens(usage.totals.totalTokens)} />
+						<MetricCard label="缓存命中率" value={`${(usage.totals.cacheHitRate ?? 0).toFixed(1)}%`} />
+						<MetricCard label="总成本" value={fmtCost(usage.totals.cost)} />
+						<MetricCard label="调用次数" value={String(usage.totals.calls)} />
+						<MetricCard
+							label="日均(有记录天数)"
+							value={fmtTokens(usage.totals.totalTokens / Math.max(1, usage.days.length))}
+						/>
+					</section>
+					<div className="dashboard-split">
+						<div className="usage-channels">
+							<h4 className="steps-title">渠道分布</h4>
+							<table className="data-table">
+								<thead>
+									<tr><th>渠道</th><th>Tokens</th><th>占比</th><th>成本</th></tr>
+								</thead>
+								<tbody>
+									{usage.channels.map((channel) => (
+										<tr key={channel.channel}>
+											<td><span className={`tag tag-${channel.channel}`}>{channel.channel}</span></td>
+											<td>{fmtTokens(channel.totalTokens)}</td>
+											<td>
+												<div className="usage-bar-row">
+													<div
+														className="usage-bar-inline"
+														style={{ width: `${(channel.totalTokens / Math.max(1, usage.totals.totalTokens)) * 100}%` }}
+													/>
+												</div>
+											</td>
+											<td>{fmtCost(channel.cost)}</td>
+										</tr>
+									))}
+									{usage.channels.length === 0 && (
+										<tr><td colSpan={4} className="empty-hint">暂无用量记录</td></tr>
+									)}
+								</tbody>
+							</table>
+						</div>
+						<UsageCalendar days={usage.days} />
+					</div>
+				</div>
+			)}
+			{PLUGINS_TAB_ENABLED && tab === "plugins" && (
 				<div className="dashboard-split">
 					<div className="session-panel-inline">
 						{plugins.map((plugin) => (
@@ -528,11 +603,131 @@ function formatCell(value: unknown): string {
 	return String(value);
 }
 
-function MetricCard({ label, value }: { label: string; value: number }) {
+function MetricCard({ label, value }: { label: string; value: number | string }) {
 	return (
 		<div className="metric-card">
 			<div className="metric-card__value">{value}</div>
 			<div className="metric-card__label">{label}</div>
 		</div>
 	);
+}
+
+const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
+
+/** 月历用量视图:一行一周,单元格显示当日用量,悬浮显示明细,可切换月份。 */
+function UsageCalendar({ days }: { days: UsageBucketRow[] }) {
+	const now = new Date();
+	const [viewYear, setViewYear] = useState(now.getFullYear());
+	const [viewMonth, setViewMonth] = useState(now.getMonth());
+	const [hoverKey, setHoverKey] = useState<string | null>(null);
+
+	const dayMap = new Map(days.map((day) => [day.label, day]));
+	const monthPrefix = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}`;
+	const firstDay = new Date(viewYear, viewMonth, 1);
+	const leadingBlanks = (firstDay.getDay() + 6) % 7; // 周一为一周起点
+	const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+	const weeks: Array<Array<number | null>> = [];
+	let week: Array<number | null> = [];
+	for (let slot = 0; slot < leadingBlanks; slot++) week.push(null);
+	for (let day = 1; day <= daysInMonth; day++) {
+		week.push(day);
+		if (week.length === 7) {
+			weeks.push(week);
+			week = [];
+		}
+	}
+	while (week.length < 7) week.push(null);
+	if (week.some((day) => day !== null)) weeks.push(week);
+
+	const monthTokens = (day: number): number =>
+		dayMap.get(`${monthPrefix}-${String(day).padStart(2, "0")}`)?.totalTokens ?? 0;
+	const monthMax = Math.max(
+		1,
+		...Array.from({ length: daysInMonth }, (_, index) => monthTokens(index + 1)),
+	);
+	const hoverRow = hoverKey ? dayMap.get(hoverKey) : undefined;
+
+	const shiftMonth = (delta: number): void => {
+		let month = viewMonth + delta;
+		let year = viewYear;
+		if (month < 0) {
+			month = 11;
+			year -= 1;
+		} else if (month > 11) {
+			month = 0;
+			year += 1;
+		}
+		setViewMonth(month);
+		setViewYear(year);
+		setHoverKey(null);
+	};
+	const isCurrentMonth = viewYear === now.getFullYear() && viewMonth === now.getMonth();
+
+	return (
+		<div className="usage-calendar">
+			<div className="filter-row">
+				<h4 className="steps-title">月度用量</h4>
+				<button type="button" className="icon-btn" onClick={() => shiftMonth(-1)}>‹</button>
+				<span className="usage-calendar__month">{viewYear} 年 {viewMonth + 1} 月</span>
+				<button type="button" className="icon-btn" onClick={() => shiftMonth(1)}>›</button>
+				{!isCurrentMonth && (
+					<button type="button" className="filter-chip" onClick={() => { setViewYear(now.getFullYear()); setViewMonth(now.getMonth()); setHoverKey(null); }}>
+						回到本月
+					</button>
+				)}
+			</div>
+			{hoverRow && (
+				<div className="usage-calendar__tip">
+					<span className="usage-calendar__tip-date">{hoverRow.label}</span>
+					<span>Tokens {hoverRow.totalTokens.toLocaleString()}（{fmtTokens(hoverRow.totalTokens)}）</span>
+					<span>缓存命中率 {(hoverRow.cacheHitRate ?? 0).toFixed(1)}%</span>
+					<span>输入 {fmtTokens(hoverRow.input)} · 输出 {fmtTokens(hoverRow.output)}</span>
+					<span>调用 {hoverRow.calls} 次 · 成本 {fmtCost(hoverRow.cost)}</span>
+				</div>
+			)}
+			<div className="usage-calendar__grid">
+				{WEEKDAY_LABELS.map((label) => (
+					<div key={label} className="usage-calendar__weekday">{label}</div>
+				))}
+				{weeks.flatMap((row) => row).map((day, index) => {
+					if (day === null) return <div key={`blank-${index}`} className="usage-calendar__cell blank" />;
+					const key = `${monthPrefix}-${String(day).padStart(2, "0")}`;
+					const row = dayMap.get(key);
+					return (
+						<div
+							key={key}
+							className={`usage-calendar__cell ${row ? "has-usage" : ""} ${hoverKey === key ? "hover" : ""}`}
+							onMouseEnter={() => setHoverKey(key)}
+							onMouseLeave={() => setHoverKey(null)}
+						>
+							<span className="usage-calendar__daynum">{day}</span>
+							{row && (
+								<>
+									<span className="usage-calendar__amount">{fmtTokens(row.totalTokens)}</span>
+									<span
+										className="usage-calendar__bar"
+										style={{ width: `${Math.max(8, (row.totalTokens / monthMax) * 100)}%` }}
+									/>
+								</>
+							)}
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+function fmtTokens(tokens: number): string {
+	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
+	if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+	return String(Math.round(tokens));
+}
+
+function fmtCost(cost: number): string {
+	if (cost >= 1) return `$${cost.toFixed(2)}`;
+	if (cost >= 0.001) return `$${cost.toFixed(4)}`;
+	if (cost > 0) return `$${cost.toFixed(6)}`;
+	return "$0";
 }

@@ -88,7 +88,6 @@ export async function handleSamplingRequest(
 
 	const messages = params.messages.map(convertSamplingMessage);
 	const { model, apiKey, headers } = await resolveSamplingModel(options, params.modelPreferences);
-	const _resolvedHeaders = headers ?? {};
 	throwIfAborted(signal);
 	await confirmSampling(
 		options,

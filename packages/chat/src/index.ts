@@ -421,7 +421,7 @@ interface ChatToolBuildDeps {
 
 function buildChatTools(deps: ChatToolBuildDeps, scope: ChatSessionScope): ToolDefinition[] {
 	const tools: ToolDefinition[] = [];
-	tools.push(createMessagePushTool(deps.delivery));
+	tools.push(createMessagePushTool(deps.delivery, scope));
 	tools.push(
 		...createWebTools({
 			maxChars: deps.web?.fetch?.maxChars,

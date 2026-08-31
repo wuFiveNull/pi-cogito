@@ -18,6 +18,7 @@ config.json
 
 # Runtime data
 .run/
+.cogito/extensions/drift/ai-news-digest/
 *.db-shm
 *.db-wal
 *.tar.gz

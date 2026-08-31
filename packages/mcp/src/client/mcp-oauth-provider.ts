@@ -29,7 +29,10 @@ import {
 	updateClientInfo,
 	updateTokens,
 } from "./mcp-auth.ts";
+import type { OAuthConfig } from "./types.ts";
 import { resolveCommandSecret } from "./utils.ts";
+
+export type McpOAuthConfig = OAuthConfig;
 
 type IssuerBoundClientInformation = OAuthClientInformationMixed & { issuer?: string };
 type IssuerBoundTokens = OAuthTokens & { issuer?: string };
@@ -76,18 +79,6 @@ export function getOAuthCallbackPath(): string {
 
 export function setOAuthCallbackPath(path: string): void {
 	oauthCallbackPath = path.startsWith("/") ? path : `/${path}`;
-}
-
-/** Configuration options for OAuth */
-export interface McpOAuthConfig {
-	grantType?: "authorization_code" | "client_credentials";
-	clientId?: string;
-	clientSecret?: string;
-	scope?: string;
-	authorizationParams?: Record<string, string>;
-	redirectUri?: string;
-	clientName?: string;
-	clientUri?: string;
 }
 
 const reservedAuthorizationParams = new Set([

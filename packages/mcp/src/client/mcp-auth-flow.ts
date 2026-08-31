@@ -598,7 +598,6 @@ export async function completeAuthFromInput(
 	const signal = combineAbortSignals(runtime.signal, options.signal);
 	throwIfAborted(signal);
 	const key = getPendingAuthKey(serverName, fallbackAuthStorageOptions);
-	const _authStorageOptions = runtimeState.pendingAuths.get(key)?.authStorageOptions ?? fallbackAuthStorageOptions;
 	const oauthState = runtimeState.pendingAuthStates.get(key);
 	throwIfAborted(signal);
 	const parsed = parseAuthorizationRedirectInput(input, oauthState);
@@ -863,7 +862,6 @@ export async function getValidToken(
  * @returns The current auth status
  */
 export async function getAuthStatus(serverName: string, options: AuthenticateOptions = {}): Promise<AuthStatus> {
-	const _runtime = getRuntime(options);
 	const authStorageOptions = options.authStorageOptions ?? {};
 	const hasTokens = await hasStoredTokens(serverName, authStorageOptions);
 	if (!hasTokens) return "not_authenticated";
