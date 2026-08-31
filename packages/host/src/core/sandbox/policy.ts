@@ -1,0 +1,80 @@
+/**
+ * Pure path/domain policy checks for the sandbox extension.
+ *
+ * Ported from pi-sandbox (https://github.com/carderne/pi-sandbox, MIT),
+ * which is based on badlogic/pi-mono's sandbox example extension.
+ */
+
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, resolve } from "node:path";
+
+export type WritePolicy = "deny" | "prompt" | "allow";
+
+export function decideWritePolicy(path: string, allowWrite: string[], denyWrite: string[]): WritePolicy {
+	if (matchesPattern(path, denyWrite)) return "deny";
+	if (allowWrite.length === 0 || !matchesPattern(path, allowWrite)) return "prompt";
+	return "allow";
+}
+
+export function extractDomainsFromCommand(command: string): string[] {
+	const urlRegex = /https?:\/\/([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+	const domains = new Set<string>();
+	for (const match of command.matchAll(urlRegex)) domains.add(match[1]);
+	return [...domains];
+}
+
+export function domainMatchesPattern(domain: string, pattern: string): boolean {
+	if (pattern === "*") return true;
+	if (pattern.startsWith("*.")) {
+		const base = pattern.slice(2);
+		return domain === base || domain.endsWith(`.${base}`);
+	}
+	return domain === pattern;
+}
+
+export function allowsAllDomains(allowedDomains: string[] | undefined): boolean {
+	return allowedDomains?.includes("*") ?? false;
+}
+
+export function domainIsAllowed(domain: string, allowedDomains: string[]): boolean {
+	return allowedDomains.some((pattern) => domainMatchesPattern(domain, pattern));
+}
+
+function expandPath(filePath: string): string {
+	return resolve(filePath.replace(/^~(?=$|\/)/, homedir()));
+}
+
+export function canonicalizePath(filePath: string): string {
+	const absolutePath = expandPath(filePath);
+	try {
+		return realpathSync.native(absolutePath);
+	} catch {
+		const tail: string[] = [];
+		let probe = absolutePath;
+		while (!existsSync(probe)) {
+			const parent = dirname(probe);
+			if (parent === probe) return absolutePath;
+			tail.unshift(basename(probe));
+			probe = parent;
+		}
+		try {
+			return resolve(realpathSync.native(probe), ...tail);
+		} catch {
+			return absolutePath;
+		}
+	}
+}
+
+export function matchesPattern(filePath: string, patterns: string[]): boolean {
+	const absolutePath = canonicalizePath(filePath);
+	return patterns.some((pattern) => {
+		const absolutePattern = pattern.includes("*") ? expandPath(pattern) : canonicalizePath(pattern);
+		if (pattern.includes("*")) {
+			const escaped = absolutePattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+			return new RegExp(`^${escaped}$`).test(absolutePath);
+		}
+		const separator = absolutePattern.endsWith("/") ? "" : "/";
+		return absolutePath === absolutePattern || absolutePath.startsWith(absolutePattern + separator);
+	});
+}

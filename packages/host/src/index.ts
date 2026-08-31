@@ -23,6 +23,18 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
+// Approval (AI review)
+export {
+	type ApprovalCompleteFn,
+	type ApprovalJudge,
+	type ApprovalJudgeSettings,
+	type ApprovalKind,
+	type ApprovalModelSource,
+	type ApprovalRequest,
+	type ApprovalVerdict,
+	createLlmApprovalJudge,
+	parseVerdict,
+} from "./core/approval/index.ts";
 export { readStoredCredential } from "./core/auth-storage.ts";
 // Compaction
 export {
@@ -237,6 +249,15 @@ export type {
 export { DefaultPackageManager } from "./core/package-manager.ts";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
 export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
+// Sandbox
+export {
+	DEFAULT_CONFIG as DEFAULT_SANDBOX_CONFIG,
+	type SandboxApprovalConfig,
+	type SandboxConfig,
+	type SandboxConfigFile,
+} from "./core/sandbox/config.ts";
+export type { SessionAllowances as SandboxSessionAllowances } from "./core/sandbox/runtime.ts";
+export { createSandboxExtension } from "./core/sandbox/sandbox-extension.ts";
 // SDK for programmatic usage
 export {
 	AgentSessionRuntime,

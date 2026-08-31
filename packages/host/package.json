@@ -27,6 +27,7 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
+		"@carderne/sandbox-runtime": "0.0.70",
 		"@cogito/agent-core": "^0.83.0",
 		"@cogito/ai": "^0.83.0",
 		"@cogito/storage-sqlite-node": "0.83.0",

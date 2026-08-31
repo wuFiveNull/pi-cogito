@@ -25,6 +25,18 @@ export {
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "./agent-session-services.ts";
+// Approval (AI review)
+export {
+	type ApprovalCompleteFn,
+	type ApprovalJudge,
+	type ApprovalJudgeSettings,
+	type ApprovalKind,
+	type ApprovalModelSource,
+	type ApprovalRequest,
+	type ApprovalVerdict,
+	createLlmApprovalJudge,
+	parseVerdict,
+} from "./approval/index.ts";
 export { type BashExecutorOptions, type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 export type { CompactionResult } from "./compaction/index.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./event-bus.ts";
@@ -77,6 +89,15 @@ export {
 	type TurnStartEvent,
 	type WorkingIndicatorOptions,
 } from "./extensions/index.ts";
+// Sandbox
+export {
+	DEFAULT_CONFIG as DEFAULT_SANDBOX_CONFIG,
+	type SandboxApprovalConfig,
+	type SandboxConfig,
+	type SandboxConfigFile,
+} from "./sandbox/config.ts";
+export type { SessionAllowances as SandboxSessionAllowances } from "./sandbox/runtime.ts";
+export { createSandboxExtension } from "./sandbox/sandbox-extension.ts";
 export { createSyntheticSourceInfo } from "./source-info.ts";
 export { type CreateSubagentExtensionOptions, createSubagentExtension } from "./subagent-extension.ts";
 export {
