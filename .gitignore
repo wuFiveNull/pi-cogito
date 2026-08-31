@@ -20,7 +20,7 @@ config.json
 .run/
 *.db-shm
 *.db-wal
-cogito-*.tar.gz
+*.tar.gz
 
 # Python virtualenvs
 .venv/
